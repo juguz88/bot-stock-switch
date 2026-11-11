@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import random
 import re
 from curl_cffi import requests
 from bs4 import BeautifulSoup
@@ -8,6 +9,14 @@ from bs4 import BeautifulSoup
 # ================= CONFIGURACIÓN =================
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+MODO_PRUEBA = os.environ.get("MODO_PRUEBA", "false").lower() == "true"
+
+HEADERS = {
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    "Pragma": "no-cache",
+    "Expires": "0",
+    "Accept-Language": "es-ES,es;q=0.9"
+}
 
 PRODUCTOS = [
     # --- The Shop Gamer ---
@@ -52,28 +61,42 @@ PRODUCTOS = [
 ]
 # =================================================
 
-def avisar_telegram(mensaje):
-    url_api = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": mensaje, "parse_mode": "HTML"}
-    try:
-        requests.post(url_api, json=payload, timeout=10)
-    except Exception as e:
-        print(f"Error al enviar Telegram: {e}")
+avisados_en_este_turno = set()
 
-def verificar_articulo(producto):
+def avisar_telegram(mensaje, url_compra=None):
+    url_api = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": mensaje,
+        "parse_mode": "HTML"
+    }
+    if url_compra:
+        payload["reply_markup"] = {
+            "inline_keyboard": [[{"text": "🛒 ABRIR TIENDA Y COMPRAR", "url": url_compra}]]
+        }
+
+    for intento in range(2):
+        try:
+            r = requests.post(url_api, json=payload, timeout=10)
+            if r.status_code == 200:
+                break
+        except Exception as e:
+            print(f"Error al enviar Telegram (intento {intento + 1}): {e}")
+            time.sleep(1)
+
+def verificar_articulo(sesion, producto):
     nombre = producto["nombre"]
     url = producto["url"]
 
     try:
-        respuesta = requests.get(url, impersonate="chrome124", timeout=8)
-        
+        respuesta = sesion.get(url, headers=HEADERS, timeout=8)
+
         if respuesta.status_code != 200:
             print(f"[{nombre}] HTTP {respuesta.status_code}. Saltando.")
             return False
 
         html = respuesta.text.lower()
 
-        # Filtro de pantallas anti-bot
         if "cf-browser-verification" in html or "challenge-platform" in html or "just a moment" in html:
             print(f"[{nombre}] Pantalla anti-bot temporal. Saltando.")
             return False
@@ -91,31 +114,39 @@ def verificar_articulo(producto):
             if boton and not desactivado and not dice_agotado:
                 hay_stock = True
 
-        # 2. Regla Impact Game (WooCommerce)
+        # 2. Regla Impact Game (WooCommerce - Acotado a la ficha principal)
         elif "impactgame.es" in url:
-            boton = soup.find("button", {"name": "add-to-cart"}) or soup.find(class_=re.compile(r"single_add_to_cart_button", re.I))
-            texto_general = soup.get_text().lower()
-            dice_sin_stock = "sin existencias" in texto_general or "agotado" in texto_general
-            desactivado = boton.has_attr("disabled") if boton else True
+            ficha = soup.find("div", class_=re.compile(r"summary|product-info|product-main", re.I)) or soup
+            boton = ficha.find("button", {"name": "add-to-cart"}) or ficha.find(class_=re.compile(r"single_add_to_cart_button", re.I))
+            etiqueta_agotado = ficha.find(class_=re.compile(r"out-of-stock", re.I))
+            texto_ficha = etiqueta_agotado.get_text(strip=True).lower() if etiqueta_agotado else ""
+            dice_sin_stock = any(p in texto_ficha for p in ["sin existencias", "agotado", "fuera de stock"])
+            clases_boton = " ".join(boton.get("class", [])).lower() if boton else ""
+            desactivado = (boton.has_attr("disabled") or "disabled" in clases_boton) if boton else True
             if boton and not desactivado and not dice_sin_stock:
                 hay_stock = True
 
-        # 3. Regla Xtralife
+        # 3. Regla Xtralife (Acotado al botón de compra/reserva)
         elif "xtralife.com" in url:
-            texto_general = soup.get_text().lower()
             boton_compra = soup.find(["button", "a"], class_=re.compile(r"btn-buy|btn-reserve|add-to-cart", re.I))
-            dice_agotado = any(p in texto_general for p in ["avísame cuando esté disponible", "avisadme", "sin stock", "no disponible"])
-            if boton_compra and not dice_agotado:
-                hay_stock = True
+            if boton_compra:
+                texto_boton = boton_compra.get_text(strip=True).lower()
+                clases_boton = " ".join(boton_compra.get("class", [])).lower()
+                desactivado = boton_compra.has_attr("disabled") or "disabled" in clases_boton
+                es_avisador = any(p in texto_boton for p in ["avísame", "avisadme", "agotado", "sin stock", "no disponible"])
+                if not desactivado and not es_avisador:
+                    hay_stock = True
 
         if hay_stock:
             print(f"¡¡¡STOCK REAL CONFIRMADO EN: {nombre}!!!")
-            mensaje = (
-                f"🚨 <b>¡HAY STOCK CONFIRMADO!</b> 🚨\n\n"
-                f"<b>Artículo:</b> {nombre}\n"
-                f"<b>Enlace de compra:</b>\n{url}"
-            )
-            avisar_telegram(mensaje)
+            if url not in avisados_en_este_turno:
+                mensaje = (
+                    f"🚨 <b>¡HAY STOCK CONFIRMADO!</b> 🚨\n\n"
+                    f"🎮 <b>{nombre}</b>\n\n"
+                    f"🔗 {url}"
+                )
+                avisar_telegram(mensaje, url_compra=url)
+                avisados_en_este_turno.add(url)
             return True
         else:
             print(f"[{nombre}] Sigue agotado.")
@@ -125,14 +156,25 @@ def verificar_articulo(producto):
         print(f"[{nombre}] Error de conexión: {e}")
         return False
 
-# 3 rondas completas para los 9 productos
-for ronda in range(3):
-    hora = time.strftime("%H:%M:%S")
-    print(f"\n--- [{hora}] Ronda {ronda + 1}/3 ---")
-    
-    for prod in PRODUCTOS:
-        verificar_articulo(prod)
-        time.sleep(2)
+# Si activaste la casilla de prueba manual en GitHub, manda confirmación a Telegram
+if MODO_PRUEBA:
+    print("Enviando mensaje de prueba a Telegram...")
+    avisar_telegram(
+        "✅ <b>Bot Switch 2 operativo</b>\n\n"
+        "La conexión con Telegram funciona correctamente y los 9 artículos están bajo vigilancia.",
+        url_compra="https://theshopgamer.com"
+    )
 
-    if ronda < 2:
-        time.sleep(20)
+total_rondas = 1 if MODO_PRUEBA else 3
+
+with requests.Session(impersonate="chrome124") as sesion:
+    for ronda in range(total_rondas):
+        hora = time.strftime("%H:%M:%S")
+        print(f"\n--- [{hora}] Ronda {ronda + 1}/{total_rondas} ---")
+
+        for prod in PRODUCTOS:
+            verificar_articulo(sesion, prod)
+            time.sleep(random.uniform(1.2, 2.6))
+
+        if ronda < total_rondas - 1:
+            time.sleep(20)
