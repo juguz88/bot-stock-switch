@@ -10,6 +10,7 @@ TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 PRODUCTOS = [
+    # --- The Shop Gamer ---
     {
         "nombre": "TSG - Nintendo Switch 2 Edición Zelda",
         "url": "https://theshopgamer.com/es/consolas-switch-2/21472-consola-nintendo-switch-2-edicion-especial-zelda-40-aniversario-version-espanola-garantia-europea-european-warranty-0045496337292.html"
@@ -26,6 +27,7 @@ PRODUCTOS = [
         "nombre": "TSG - Mando Zelda 40 Aniversario",
         "url": "https://theshopgamer.com/es/accesorios-switch-2/21558-nintendo-switch-2-pro-controller-edicion-limitada-the-legend-of-zelda-40-aniversario-para-nintendo-switch-2-version-espanola-0045496322045.html"
     },
+    # --- Xtralife ---
     {
         "nombre": "XTRALIFE - Nintendo Switch 2 Edición Zelda",
         "url": "https://www.xtralife.com/producto/nintendo-switch-2-edicion-the-legend-of-zelda-40-aniversario-switch-2-edicion-especial/113185"
@@ -38,10 +40,7 @@ PRODUCTOS = [
         "nombre": "XTRALIFE - Mando Zelda 40 Aniversario",
         "url": "https://www.xtralife.com/producto/nintendo-switch-2-pro-controller-zelda-40-aniversario-switch-2/113184"
     },
-    {
-        "nombre": "TODOCONSOLA - Mando Zelda 40 Aniversario",
-        "url": "https://www.todoconsolas.com/accesorios-switch-2/215838-mando_pro_controller_edicion_zelda_40_aniversario_btr_switch_2_280598-045496322229.html"
-    },
+    # --- Impact Game ---
     {
         "nombre": "IMPACT - Funda Zelda 40 Aniversario",
         "url": "https://impactgame.es/producto/reserva-funda-de-transporte-nintendo-switch-2-zelda-40o-aniversario/"
@@ -49,10 +48,6 @@ PRODUCTOS = [
     {
         "nombre": "IMPACT - Mando Zelda 40 Aniversario",
         "url": "https://impactgame.es/producto/reserva-mando-pro-nintendo-switch-2-the-legend-of-zelda-40o-aniversario/"
-    },
-    {
-        "nombre": "COOL - Nintendo Switch 2 Edición Zelda",
-        "url": "https://www.coolmod.com/nintendo-switch-2-edicion-especial-the-legend-of-zelda-40th-aniversario-256gb/"
     }
 ]
 # =================================================
@@ -70,25 +65,24 @@ def verificar_articulo(producto):
     url = producto["url"]
 
     try:
-        # Se conecta imitando a Chrome 124 a nivel de red con un límite de espera de 8 segundos
         respuesta = requests.get(url, impersonate="chrome124", timeout=8)
         
         if respuesta.status_code != 200:
-            print(f"[{nombre}] HTTP {respuesta.status_code} (bloqueo o error). Saltando.")
+            print(f"[{nombre}] HTTP {respuesta.status_code}. Saltando.")
             return False
 
         html = respuesta.text.lower()
 
-        # Filtro de pantallas de verificación anti-bot
+        # Filtro de seguridad anti-bot (Cloudflare / captchas)
         if "cf-browser-verification" in html or "challenge-platform" in html or "just a moment" in html:
-            print(f"[{nombre}] Pantalla anti-bot detectada. Saltando.")
+            print(f"[{nombre}] Pantalla anti-bot temporal. Saltando.")
             return False
 
         soup = BeautifulSoup(respuesta.text, "html.parser")
         hay_stock = False
 
-        # --- The Shop Gamer y Todoconsolas (PrestaShop) ---
-        if "theshopgamer.com" in url or "todoconsolas.com" in url:
+        # 1. Regla The Shop Gamer (PrestaShop)
+        if "theshopgamer.com" in url:
             boton = soup.find("button", {"data-button-action": "add-to-cart"})
             bloque_stock = soup.find(id="product-availability")
             texto_stock = bloque_stock.get_text(strip=True).lower() if bloque_stock else ""
@@ -97,7 +91,7 @@ def verificar_articulo(producto):
             if boton and not desactivado and not dice_agotado:
                 hay_stock = True
 
-        # --- Impact Game (WooCommerce) ---
+        # 2. Regla Impact Game (WooCommerce)
         elif "impactgame.es" in url:
             boton = soup.find("button", {"name": "add-to-cart"}) or soup.find(class_=re.compile(r"single_add_to_cart_button", re.I))
             texto_general = soup.get_text().lower()
@@ -106,20 +100,12 @@ def verificar_articulo(producto):
             if boton and not desactivado and not dice_sin_stock:
                 hay_stock = True
 
-        # --- Xtralife ---
+        # 3. Regla Xtralife
         elif "xtralife.com" in url:
             texto_general = soup.get_text().lower()
             boton_compra = soup.find(["button", "a"], class_=re.compile(r"btn-buy|btn-reserve|add-to-cart", re.I))
             dice_agotado = any(p in texto_general for p in ["avísame cuando esté disponible", "avisadme", "sin stock", "no disponible"])
             if boton_compra and not dice_agotado:
-                hay_stock = True
-
-        # --- Coolmod ---
-        elif "coolmod.com" in url:
-            boton = soup.find("button", id=re.compile(r"buy-button|product-buy", re.I)) or soup.find("button", class_=re.compile(r"buy-button", re.I))
-            texto_general = soup.get_text().lower()
-            dice_agotado = any(p in texto_general for p in ["consultar disponibilidad", "sin stock", "agotado"])
-            if boton and not dice_agotado and not boton.has_attr("disabled"):
                 hay_stock = True
 
         if hay_stock:
@@ -139,7 +125,7 @@ def verificar_articulo(producto):
         print(f"[{nombre}] Error de conexión: {e}")
         return False
 
-# 3 rondas completas
+# 3 rondas completas para los 9 productos
 for ronda in range(3):
     hora = time.strftime("%H:%M:%S")
     print(f"\n--- [{hora}] Ronda {ronda + 1}/3 ---")
