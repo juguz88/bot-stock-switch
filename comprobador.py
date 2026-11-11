@@ -24,7 +24,7 @@ PRODUCTOS = [
     },
     {
         "nombre": "Mando Zelda 40 Aniversario",
-        "url": "https://theshopgamer.com/es/accesorios-switch-2/21558-nintendo-switch-2-pro-controller-edicion-limitada-the-legend-of-zelda-40-aniversario-para-nintendo-switch-2-version-espanola-0045496322045.html"
+        "url": "https://theshopgamer.com/es/accesorios-switch-2/20711-figura-amiibo-zelda-tulin-coleccion-the-legend-of-zelda-tears-of-the-kingdom-para-nintendo-switch-garantia-europea-045496381233.html"
     }
 ]
 # =================================================
