@@ -79,7 +79,7 @@ def verificar_articulo(producto):
             return False
 
         soup = BeautifulSoup(respuesta.text, "html.parser")
-        hay_stock = False
+        hay_stock = True
 
         # 1. Regla The Shop Gamer (PrestaShop)
         if "theshopgamer.com" in url:
