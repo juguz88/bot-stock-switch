@@ -24,7 +24,6 @@ try:
         sys.exit(0)
 
     soup = BeautifulSoup(respuesta.text, "html.parser")
-    avisar_telegram("🧪 <b>Prueba de conexión:</b> ¡El bot funciona y te notificará aquí!")
     
     bloque_stock = soup.find(id="product-availability")
     texto_stock = bloque_stock.get_text(strip=True).lower() if bloque_stock else ""
