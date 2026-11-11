@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import re
 import requests
 from bs4 import BeautifulSoup
 
@@ -8,7 +9,6 @@ from bs4 import BeautifulSoup
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-# Lista con tus 11 artículos:
 PRODUCTOS = [
     {
         "nombre": "TSG - Nintendo Switch 2 Edición Zelda",
@@ -59,7 +59,9 @@ PRODUCTOS = [
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8"
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+    "Upgrade-Insecure-Requests": "1"
 }
 
 def avisar_telegram(mensaje):
@@ -74,45 +76,65 @@ def verificar_articulo(producto):
     nombre = producto["nombre"]
     url = producto["url"]
 
-    # Si todavía no has pegado el enlace real, salta este artículo sin dar error
-    if "PEGA_AQUI" in url:
-        return False
-
     try:
         respuesta = requests.get(url, headers=HEADERS, timeout=15)
+        
+        # Si la tienda devuelve error o bloqueo temporal de IP, saltar sin romper el bucle
         if respuesta.status_code != 200:
-            print(f"[{nombre}] Respuesta no válida (HTTP {respuesta.status_code}).")
+            print(f"[{nombre}] HTTP {respuesta.status_code} (posible bloqueo o página caída). Saltando.")
             return False
 
         html = respuesta.text.lower()
 
-        # 1. Filtro anti-falsos positivos: si salta pantalla de verificación, ignorar
-        if "cf-browser-verification" in html or "challenge-platform" in html or "just a moment" in html:
+        # Filtro global de verificación anti-bot (Cloudflare, Datadome, etc.)
+        if "cf-browser-verification" in html or "challenge-platform" in html or "just a moment" in html or "acceso denegado" in html:
             print(f"[{nombre}] Pantalla de verificación anti-bot detectada. Saltando.")
             return False
 
         soup = BeautifulSoup(respuesta.text, "html.parser")
+        hay_stock = False
 
-        # 2. Localizar el botón de compra
-        boton_compra = soup.find("button", {"data-button-action": "add-to-cart"})
-        if not boton_compra:
-            print(f"[{nombre}] Botón de compra no encontrado en la página. Sigue en espera.")
-            return False
+        # --- REGLA 1: The Shop Gamer y Todoconsolas (PrestaShop) ---
+        if "theshopgamer.com" in url or "todoconsolas.com" in url:
+            boton = soup.find("button", {"data-button-action": "add-to-cart"})
+            bloque_stock = soup.find(id="product-availability")
+            texto_stock = bloque_stock.get_text(strip=True).lower() if bloque_stock else ""
+            desactivado = boton.has_attr("disabled") if boton else True
+            dice_agotado = any(p in texto_stock for p in ["agotado", "no disponible", "sin stock", "fuera de stock"])
+            if boton and not desactivado and not dice_agotado:
+                hay_stock = True
 
-        # 3. Comprobar si el botón está desactivado
-        esta_desactivado = boton_compra.has_attr("disabled") or "disabled" in boton_compra.get("class", [])
+        # --- REGLA 2: Impact Game (WooCommerce) ---
+        elif "impactgame.es" in url:
+            boton = soup.find("button", {"name": "add-to-cart"}) or soup.find(class_=re.compile(r"single_add_to_cart_button", re.I))
+            texto_general = soup.get_text().lower()
+            dice_sin_stock = "sin existencias" in texto_general or "agotado" in texto_general
+            desactivado = boton.has_attr("disabled") if boton else True
+            if boton and not desactivado and not dice_sin_stock:
+                hay_stock = True
 
-        # 4. Comprobar mensaje de disponibilidad
-        bloque_stock = soup.find(id="product-availability")
-        texto_stock = bloque_stock.get_text(strip=True).lower() if bloque_stock else ""
-        palabras_agotado = ["agotado", "no disponible", "sin stock", "fuera de stock"]
-        dice_agotado = any(p in texto_stock for p in palabras_agotado)
+        # --- REGLA 3: Xtralife ---
+        elif "xtralife.com" in url:
+            # En Xtralife el botón de aviso suele decir "Avisadme" cuando no hay stock
+            texto_general = soup.get_text().lower()
+            boton_compra = soup.find(["button", "a"], class_=re.compile(r"btn-buy|btn-reserve|add-to-cart", re.I))
+            dice_agotado = any(p in texto_general for p in ["avísame cuando esté disponible", "avisadme", "sin stock", "no disponible"])
+            if boton_compra and not dice_agotado:
+                hay_stock = True
 
-        # 5. SOLO avisa si el botón está físicamente activo Y no indica agotado
-        if not esta_desactivado and not dice_agotado:
-            print(f"¡¡¡STOCK REAL DETECTADO EN: {nombre}!!!")
+        # --- REGLA 4: Coolmod ---
+        elif "coolmod.com" in url:
+            boton = soup.find("button", id=re.compile(r"buy-button|product-buy", re.I)) or soup.find("button", class_=re.compile(r"buy-button", re.I))
+            texto_general = soup.get_text().lower()
+            dice_agotado = any(p in texto_general for p in ["consultar disponibilidad", "sin stock", "agotado"])
+            if boton and not dice_agotado and not boton.has_attr("disabled"):
+                hay_stock = True
+
+        # Disparar alerta si se confirma stock real
+        if hay_stock:
+            print(f"¡¡¡STOCK REAL CONFIRMADO EN: {nombre}!!!")
             mensaje = (
-                f"🚨 <b>¡HAY STOCK REAL!</b> 🚨\n\n"
+                f"🚨 <b>¡HAY STOCK CONFIRMADO!</b> 🚨\n\n"
                 f"<b>Artículo:</b> {nombre}\n"
                 f"<b>Enlace de compra:</b>\n{url}"
             )
@@ -123,7 +145,7 @@ def verificar_articulo(producto):
             return False
 
     except Exception as e:
-        print(f"[{nombre}] Error de red: {e}")
+        print(f"[{nombre}] Error de conexión: {e}")
         return False
 
 # Realiza 3 rondas completas para los 11 productos
@@ -133,7 +155,7 @@ for ronda in range(3):
     
     for prod in PRODUCTOS:
         verificar_articulo(prod)
-        time.sleep(2)  # Pausa de 2 segundos entre artículo y artículo
+        time.sleep(2)  # Pausa de cortesía entre tienda y tienda
 
     if ronda < 2:
-        time.sleep(25)
+        time.sleep(20)
