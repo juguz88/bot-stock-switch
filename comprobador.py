@@ -8,23 +8,35 @@ from bs4 import BeautifulSoup
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-# Lista con tus 4 artículos:
+# Lista con tus 7 artículos:
 PRODUCTOS = [
     {
-        "nombre": "Nintendo Switch 2 Edición Zelda",
+        "nombre": "TSG - Nintendo Switch 2 Edición Zelda",
         "url": "https://theshopgamer.com/es/consolas-switch-2/21472-consola-nintendo-switch-2-edicion-especial-zelda-40-aniversario-version-espanola-garantia-europea-european-warranty-0045496337292.html"
     },
     {
-        "nombre": "Funda Zelda 40 Aniversario",
+        "nombre": "TSG - Funda Zelda 40 Aniversario",
         "url": "https://theshopgamer.com/es/accesorios-switch-2/21559-funda-y-protector-de-pantalla-de-para-nintendo-switch-2-edicion-limitada-the-legend-of-zelda-40-aniversario-version-espanola-0045496322052.html"
     },
     {
-        "nombre": "Mando Zelda 40 Aniversario con Batería Extraíble",
+        "nombre": "TSG - Mando Zelda 40 Aniversario con Batería Extraíble",
         "url": "https://theshopgamer.com/es/accesorios-switch-2/21587-nintendo-switch-2-pro-controller-edicion-limitada-the-legend-of-zelda-40-aniversario-btr-bateria-extraible-para-nintendo-switch2-0045496322229.html"
     },
     {
-        "nombre": "Mando Zelda 40 Aniversario",
+        "nombre": "TSG - Mando Zelda 40 Aniversario",
         "url": "https://theshopgamer.com/es/accesorios-switch-2/21558-nintendo-switch-2-pro-controller-edicion-limitada-the-legend-of-zelda-40-aniversario-para-nintendo-switch-2-version-espanola-0045496322045.html"
+    },
+    {
+        "nombre": "XTRALIFE - Nintendo Switch 2 Edición Zelda",
+        "url": "https://www.xtralife.com/producto/nintendo-switch-2-edicion-the-legend-of-zelda-40-aniversario-switch-2-edicion-especial/113185"
+    },
+    {
+        "nombre": "XTRALIFE - Funda Zelda 40 Aniversario",
+        "url": "https://www.xtralife.com/producto/funda-de-transporte-nintendo-switch-2-zelda-40-aniversario-switch-2/113180"
+    },
+    {
+        "nombre": "XTRALIFE - Mando Zelda 40 Aniversario",
+        "url": "https://www.xtralife.com/producto/nintendo-switch-2-pro-controller-zelda-40-aniversario-switch-2/113184"
     }
 ]
 # =================================================
@@ -46,7 +58,7 @@ def verificar_articulo(producto):
     nombre = producto["nombre"]
     url = producto["url"]
 
-    # Si todavía no has puesto el enlace real, salta este producto sin dar error
+    # Si todavía no has pegado el enlace real, salta este artículo sin dar error
     if "PEGA_AQUI" in url:
         return False
 
@@ -83,14 +95,14 @@ def verificar_articulo(producto):
         print(f"[{nombre}] Error al consultar: {e}")
         return False
 
-# Realiza 4 rondas de revisión espaciadas 40 segundos (~3 minutos y 15 segundos en total)
+# Realiza 4 rondas de revisión espaciadas 35 segundos (~2 minutos y 45 segundos en total)
 for ronda in range(4):
     hora = time.strftime("%H:%M:%S")
     print(f"\n--- [{hora}] Ronda {ronda + 1}/4 ---")
     
     for prod in PRODUCTOS:
         verificar_articulo(prod)
-        time.sleep(2)  # Pausa de 2 segundos de cortesía entre producto y producto
+        time.sleep(2)  # Pausa de cortesía de 2 segundos entre artículo y artículo
 
     if ronda < 3:
-        time.sleep(40)
+        time.sleep(35)
