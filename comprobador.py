@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-# Lista con tus 7 artículos:
+# Lista con tus 11 artículos:
 PRODUCTOS = [
     {
         "nombre": "TSG - Nintendo Switch 2 Edición Zelda",
@@ -37,6 +37,22 @@ PRODUCTOS = [
     {
         "nombre": "XTRALIFE - Mando Zelda 40 Aniversario",
         "url": "https://www.xtralife.com/producto/nintendo-switch-2-pro-controller-zelda-40-aniversario-switch-2/113184"
+    },
+    {
+        "nombre": "TODOCONSOLA - Mando Zelda 40 Aniversario",
+        "url": "https://www.todoconsolas.com/accesorios-switch-2/215838-mando_pro_controller_edicion_zelda_40_aniversario_btr_switch_2_280598-045496322229.html"
+    },
+    {
+        "nombre": "IMPACT - Funda Zelda 40 Aniversario",
+        "url": "https://impactgame.es/producto/reserva-funda-de-transporte-nintendo-switch-2-zelda-40o-aniversario/"
+    },
+    {
+        "nombre": "IMPACT - Mando Zelda 40 Aniversario",
+        "url": "https://impactgame.es/producto/reserva-mando-pro-nintendo-switch-2-the-legend-of-zelda-40o-aniversario/"
+    },
+    {
+        "nombre": "COOL - Nintendo Switch 2 Edición Zelda",
+        "url": "https://www.coolmod.com/nintendo-switch-2-edicion-especial-the-legend-of-zelda-40th-aniversario-256gb/"
     }
 ]
 # =================================================
@@ -65,23 +81,38 @@ def verificar_articulo(producto):
     try:
         respuesta = requests.get(url, headers=HEADERS, timeout=15)
         if respuesta.status_code != 200:
-            print(f"[{nombre}] Error HTTP {respuesta.status_code}")
+            print(f"[{nombre}] Respuesta no válida (HTTP {respuesta.status_code}).")
+            return False
+
+        html = respuesta.text.lower()
+
+        # 1. Filtro anti-falsos positivos: si salta pantalla de verificación, ignorar
+        if "cf-browser-verification" in html or "challenge-platform" in html or "just a moment" in html:
+            print(f"[{nombre}] Pantalla de verificación anti-bot detectada. Saltando.")
             return False
 
         soup = BeautifulSoup(respuesta.text, "html.parser")
+
+        # 2. Localizar el botón de compra
+        boton_compra = soup.find("button", {"data-button-action": "add-to-cart"})
+        if not boton_compra:
+            print(f"[{nombre}] Botón de compra no encontrado en la página. Sigue en espera.")
+            return False
+
+        # 3. Comprobar si el botón está desactivado
+        esta_desactivado = boton_compra.has_attr("disabled") or "disabled" in boton_compra.get("class", [])
+
+        # 4. Comprobar mensaje de disponibilidad
         bloque_stock = soup.find(id="product-availability")
         texto_stock = bloque_stock.get_text(strip=True).lower() if bloque_stock else ""
-        boton_compra = soup.find("button", {"data-button-action": "add-to-cart"})
-        texto_completo = soup.get_text().lower()
-
         palabras_agotado = ["agotado", "no disponible", "sin stock", "fuera de stock"]
-        esta_agotado = any(p in texto_stock for p in palabras_agotado) or any(p in texto_completo for p in palabras_agotado)
-        boton_disponible = boton_compra and not boton_compra.has_attr("disabled")
+        dice_agotado = any(p in texto_stock for p in palabras_agotado)
 
-        if boton_disponible or not esta_agotado:
-            print(f"¡¡¡HAY STOCK DETECTADO EN: {nombre}!!!")
+        # 5. SOLO avisa si el botón está físicamente activo Y no indica agotado
+        if not esta_desactivado and not dice_agotado:
+            print(f"¡¡¡STOCK REAL DETECTADO EN: {nombre}!!!")
             mensaje = (
-                f"🚨 <b>¡HAY STOCK DETECTADO!</b> 🚨\n\n"
+                f"🚨 <b>¡HAY STOCK REAL!</b> 🚨\n\n"
                 f"<b>Artículo:</b> {nombre}\n"
                 f"<b>Enlace de compra:</b>\n{url}"
             )
@@ -92,17 +123,17 @@ def verificar_articulo(producto):
             return False
 
     except Exception as e:
-        print(f"[{nombre}] Error al consultar: {e}")
+        print(f"[{nombre}] Error de red: {e}")
         return False
 
-# Realiza 4 rondas de revisión espaciadas 35 segundos (~2 minutos y 45 segundos en total)
-for ronda in range(4):
+# Realiza 3 rondas completas para los 11 productos
+for ronda in range(3):
     hora = time.strftime("%H:%M:%S")
-    print(f"\n--- [{hora}] Ronda {ronda + 1}/4 ---")
+    print(f"\n--- [{hora}] Ronda {ronda + 1}/3 ---")
     
     for prod in PRODUCTOS:
         verificar_articulo(prod)
-        time.sleep(2)  # Pausa de cortesía de 2 segundos entre artículo y artículo
+        time.sleep(2)  # Pausa de 2 segundos entre artículo y artículo
 
-    if ronda < 3:
-        time.sleep(35)
+    if ronda < 2:
+        time.sleep(25)
