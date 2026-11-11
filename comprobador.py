@@ -73,7 +73,7 @@ def verificar_articulo(producto):
 
         html = respuesta.text.lower()
 
-        # Filtro de seguridad anti-bot (Cloudflare / captchas)
+        # Filtro de pantallas anti-bot
         if "cf-browser-verification" in html or "challenge-platform" in html or "just a moment" in html:
             print(f"[{nombre}] Pantalla anti-bot temporal. Saltando.")
             return False
