@@ -1,11 +1,33 @@
 import os
 import sys
+import time
 import requests
 from bs4 import BeautifulSoup
 
+# ================= CONFIGURACIÓN =================
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
-URL = "https://theshopgamer.com/es/consolas-switch-2/21472-consola-nintendo-switch-2-edicion-especial-zelda-40-aniversario-version-espanola-garantia-europea-european-warranty-0045496337292.html"
+
+# Lista con tus 4 artículos:
+PRODUCTOS = [
+    {
+        "nombre": "Nintendo Switch 2 Edición Zelda",
+        "url": "https://theshopgamer.com/es/consolas-switch-2/21472-consola-nintendo-switch-2-edicion-especial-zelda-40-aniversario-version-espanola-garantia-europea-european-warranty-0045496337292.html"
+    },
+    {
+        "nombre": "Funda Zelda 40 Aniversario",
+        "url": "https://theshopgamer.com/es/accesorios-switch-2/21559-funda-y-protector-de-pantalla-de-para-nintendo-switch-2-edicion-limitada-the-legend-of-zelda-40-aniversario-version-espanola-0045496322052.html"
+    },
+    {
+        "nombre": "Mando Zelda 40 Aniversario con Batería Extraíble",
+        "url": "https://theshopgamer.com/es/accesorios-switch-2/21587-nintendo-switch-2-pro-controller-edicion-limitada-the-legend-of-zelda-40-aniversario-btr-bateria-extraible-para-nintendo-switch2-0045496322229.html"
+    },
+    {
+        "nombre": "Mando Zelda 40 Aniversario",
+        "url": "https://theshopgamer.com/es/accesorios-switch-2/21558-nintendo-switch-2-pro-controller-edicion-limitada-the-legend-of-zelda-40-aniversario-para-nintendo-switch-2-version-espanola-0045496322045.html"
+    }
+]
+# =================================================
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
@@ -15,34 +37,60 @@ HEADERS = {
 def avisar_telegram(mensaje):
     url_api = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": mensaje, "parse_mode": "HTML"}
-    requests.post(url_api, json=payload, timeout=10)
+    try:
+        requests.post(url_api, json=payload, timeout=10)
+    except Exception as e:
+        print(f"Error al enviar Telegram: {e}")
 
-try:
-    respuesta = requests.get(URL, headers=HEADERS, timeout=15)
-    if respuesta.status_code != 200:
-        print(f"Error HTTP: {respuesta.status_code}")
-        sys.exit(0)
+def verificar_articulo(producto):
+    nombre = producto["nombre"]
+    url = producto["url"]
 
-    soup = BeautifulSoup(respuesta.text, "html.parser")
+    # Si todavía no has puesto el enlace real, salta este producto sin dar error
+    if "PEGA_AQUI" in url:
+        return False
+
+    try:
+        respuesta = requests.get(url, headers=HEADERS, timeout=15)
+        if respuesta.status_code != 200:
+            print(f"[{nombre}] Error HTTP {respuesta.status_code}")
+            return False
+
+        soup = BeautifulSoup(respuesta.text, "html.parser")
+        bloque_stock = soup.find(id="product-availability")
+        texto_stock = bloque_stock.get_text(strip=True).lower() if bloque_stock else ""
+        boton_compra = soup.find("button", {"data-button-action": "add-to-cart"})
+        texto_completo = soup.get_text().lower()
+
+        palabras_agotado = ["agotado", "no disponible", "sin stock", "fuera de stock"]
+        esta_agotado = any(p in texto_stock for p in palabras_agotado) or any(p in texto_completo for p in palabras_agotado)
+        boton_disponible = boton_compra and not boton_compra.has_attr("disabled")
+
+        if boton_disponible or not esta_agotado:
+            print(f"¡¡¡HAY STOCK DETECTADO EN: {nombre}!!!")
+            mensaje = (
+                f"🚨 <b>¡HAY STOCK DETECTADO!</b> 🚨\n\n"
+                f"<b>Artículo:</b> {nombre}\n"
+                f"<b>Enlace de compra:</b>\n{url}"
+            )
+            avisar_telegram(mensaje)
+            return True
+        else:
+            print(f"[{nombre}] Sigue agotado.")
+            return False
+
+    except Exception as e:
+        print(f"[{nombre}] Error al consultar: {e}")
+        return False
+
+# Realiza 4 rondas de revisión espaciadas 40 segundos (~3 minutos y 15 segundos en total)
+for ronda in range(4):
+    hora = time.strftime("%H:%M:%S")
+    print(f"\n--- [{hora}] Ronda {ronda + 1}/4 ---")
     
-    bloque_stock = soup.find(id="product-availability")
-    texto_stock = bloque_stock.get_text(strip=True).lower() if bloque_stock else ""
-    boton_compra = soup.find("button", {"data-button-action": "add-to-cart"})
-    texto_completo = soup.get_text().lower()
-    
-    palabras_agotado = ["agotado", "no disponible", "sin stock", "fuera de stock"]
-    esta_agotado = any(p in texto_stock for p in palabras_agotado) or any(p in texto_completo for p in palabras_agotado)
-    boton_disponible = boton_compra and not boton_compra.has_attr("disabled")
+    for prod in PRODUCTOS:
+        verificar_articulo(prod)
+        time.sleep(2)  # Pausa de 2 segundos de cortesía entre producto y producto
 
-    if boton_disponible or not esta_agotado:
-        print("¡¡¡HAY STOCK DETECTADO!!! Enviando alerta...")
-        mensaje = (
-            "🚨 <b>¡HAY STOCK DE LA NINTENDO SWITCH 2 ZELDA!</b> 🚨\n\n"
-            f"Corre a comprarla aquí:\n{URL}"
-        )
-        avisar_telegram(mensaje)
-    else:
-        print("Comprobación terminada: Sigue sin stock.")
-
-except Exception as e:
-    print(f"Error durante la comprobación: {e}")
+    if ronda < 3:
+        time.sleep(40)
