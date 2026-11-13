@@ -322,7 +322,8 @@ if MODO_PRUEBA:
         url_compra="https://theshopgamer.com"
     )
 
-total_rondas = 1 if MODO_PRUEBA else 2
+# 1 sola pasada completa por ejecución para duplicar la duración del proxy (7-10 días por GB)
+total_rondas = 1
 
 with requests.Session(impersonate="chrome124") as sesion:
     for ronda in range(total_rondas):
