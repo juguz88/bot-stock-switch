@@ -10,7 +10,7 @@ from bs4 import BeautifulSoup
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 PROXY_URL = os.environ.get("PROXY_URL")
-MODO_PRUEBA = os.environ.get("MODO_PRUEBA", "false").lower() == "true"
+MODO_PRUEBA = False
 
 HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
