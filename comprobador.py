@@ -208,13 +208,14 @@ def verificar_articulo(sesion, producto):
         return False
 
     try:
-        # En tiendas con proxy usamos petición limpia independiente para no mezclar cookies entre distintas IPs
         if requiere_proxy:
-            respuesta = requests.get(url, headers=HEADERS, proxies=proxies_peticion, impersonate="chrome124", timeout=12)
-            # Si da 403 a la primera, reintenta pidiendo otra IP española nueva y simulando Safari
+            # PcComponentes y Carrefour abren mejor entrando directamente con perfil Safari
+            navegador = "safari17_0" if any(t in url for t in ["pccomponentes.com", "carrefour.es"]) else "chrome124"
+            respuesta = requests.get(url, headers=HEADERS, proxies=proxies_peticion, impersonate=navegador, timeout=12)
             if respuesta.status_code == 403:
                 time.sleep(1)
-                respuesta = requests.get(url, headers=HEADERS, proxies=proxies_peticion, impersonate="safari17_0", timeout=12)
+                navegador_alt = "chrome124" if navegador == "safari17_0" else "safari17_0"
+                respuesta = requests.get(url, headers=HEADERS, proxies=proxies_peticion, impersonate=navegador_alt, timeout=12)
         else:
             respuesta = sesion.get(url, headers=HEADERS, timeout=12)
             if respuesta.status_code in [403, 429, 503] and PROXY_URL:
@@ -226,12 +227,17 @@ def verificar_articulo(sesion, producto):
             return False
 
         html = respuesta.text.lower()
+        soup = BeautifulSoup(respuesta.text, "html.parser")
+        titulo_pagina = soup.title.get_text(strip=True).lower() if soup.title else ""
 
-        if any(b in html for b in ["cf-browser-verification", "challenge-platform", "just a moment", "datadome", "access denied"]):
+        # Comprobación precisa de pantallas de bloqueo reales (sin falsas alarmas por scripts de fondo)
+        es_bloqueo_titulo = any(b in titulo_pagina for b in ["just a moment", "un momento", "access denied", "attention required", "you have been blocked"])
+        es_bloqueo_corto = len(html) < 15000 and any(b in html for b in ["captcha-delivery.com", "cf-browser-verification"])
+
+        if es_bloqueo_titulo or es_bloqueo_corto:
             print(f"[{nombre}] Pantalla anti-bot temporal. Saltando.")
             return False
 
-        soup = BeautifulSoup(respuesta.text, "html.parser")
         hay_stock = False
 
         # 1. Regla PrestaShop (The Shop Gamer, TodoConsolas)
