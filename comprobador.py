@@ -13,10 +13,14 @@ PROXY_URL = os.environ.get("PROXY_URL")
 MODO_PRUEBA = os.environ.get("MODO_PRUEBA", "false").lower() == "true"
 
 HEADERS = {
-    "Cache-Control": "no-cache, no-store, must-revalidate",
-    "Pragma": "no-cache",
-    "Expires": "0",
-    "Accept-Language": "es-ES,es;q=0.9"
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "es-ES,es;q=0.9",
+    "Referer": "https://www.google.es/",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "cross-site",
+    "Sec-Fetch-User": "?1"
 }
 
 PRODUCTOS = [
@@ -204,12 +208,18 @@ def verificar_articulo(sesion, producto):
         return False
 
     try:
-        respuesta = sesion.get(url, headers=HEADERS, proxies=proxies_peticion, timeout=12)
-
-        # Si una tienda gratuita bloquea puntualmente la IP de GitHub, reintenta usando el proxy
-        if respuesta.status_code in [403, 429, 503] and not requiere_proxy and PROXY_URL:
-            proxies_emergencia = {"http": PROXY_URL, "https": PROXY_URL}
-            respuesta = sesion.get(url, headers=HEADERS, proxies=proxies_emergencia, timeout=12)
+        # En tiendas con proxy usamos petición limpia independiente para no mezclar cookies entre distintas IPs
+        if requiere_proxy:
+            respuesta = requests.get(url, headers=HEADERS, proxies=proxies_peticion, impersonate="chrome124", timeout=12)
+            # Si da 403 a la primera, reintenta pidiendo otra IP española nueva y simulando Safari
+            if respuesta.status_code == 403:
+                time.sleep(1)
+                respuesta = requests.get(url, headers=HEADERS, proxies=proxies_peticion, impersonate="safari17_0", timeout=12)
+        else:
+            respuesta = sesion.get(url, headers=HEADERS, timeout=12)
+            if respuesta.status_code in [403, 429, 503] and PROXY_URL:
+                proxies_emergencia = {"http": PROXY_URL, "https": PROXY_URL}
+                respuesta = requests.get(url, headers=HEADERS, proxies=proxies_emergencia, impersonate="chrome124", timeout=12)
 
         if respuesta.status_code != 200:
             print(f"[{nombre}] HTTP {respuesta.status_code}. Saltando.")
