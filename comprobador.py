@@ -3,8 +3,16 @@ import sys
 import time
 import random
 import re
+import json
+from datetime import datetime, timezone, timedelta
 from curl_cffi import requests
 from bs4 import BeautifulSoup
+
+try:
+    from zoneinfo import ZoneInfo
+    ZONA_MADRID = ZoneInfo("Europe/Madrid")
+except Exception:
+    ZONA_MADRID = timezone(timedelta(hours=1))
 
 # ================= CONFIGURACIÓN =================
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -241,32 +249,108 @@ PRODUCTOS = [
 # =================================================
 
 avisados_en_este_turno = set()
+stats = {
+    "revisados_ok": 0,
+    "proxy_ok": 0,
+    "errores_proxy_407": 0,
+    "errores_red_proxy": 0,
+    "antibot": 0
+}
 
-def avisar_telegram(mensaje, url_compra=None):
+def obtener_icono_categoria(nombre):
+    n = nombre.lower()
+    if "funda" in n or "bolsa" in n:
+        return "🎒"
+    elif "mando" in n or "controller" in n:
+        return "🕹️"
+    return "🎮"
+
+def extraer_precio(soup, html_raw):
+    try:
+        # 1. Buscar en etiquetas meta estándar (OpenGraph / Schema)
+        meta_precio = (
+            soup.find("meta", {"property": "product:price:amount"}) or
+            soup.find("meta", {"property": "og:price:amount"}) or
+            soup.find("meta", {"itemprop": "price"})
+        )
+        if meta_precio and meta_precio.get("content"):
+            valor = meta_precio["content"].strip().replace(".", ",")
+            if re.match(r"^\d+([.,]\d{1,2})?$", valor):
+                return f"{valor} €"
+
+        # 2. Buscar en bloques JSON-LD de la tienda
+        for script in soup.find_all("script", type="application/ld+json"):
+            texto_json = script.string or ""
+            m = re.search(r'"price"\s*:\s*"?(\d{2,3}(?:[.,]\d{1,2})?)"?', texto_json)
+            if m:
+                return f"{m.group(1).replace('.', ',')} €"
+
+        # 3. Búsqueda visual rápida de precio en euros
+        m_euro = re.search(r'(\d{2,3}[.,]\d{2})\s*€', soup.get_text(" ", strip=True))
+        if m_euro:
+            return f"{m_euro.group(1)} €"
+    except Exception:
+        pass
+    return "Ver en tienda"
+
+def fijar_mensaje_telegram(message_id):
+    url_pin = f"https://api.telegram.org/bot{TOKEN}/pinChatMessage"
+    payload_pin = {
+        "chat_id": CHAT_ID,
+        "message_id": message_id,
+        "disable_notification": False
+    }
+    try:
+        requests.post(url_pin, json=payload_pin, timeout=10)
+    except Exception as e:
+        print(f"No se pudo fijar el mensaje en Telegram: {e}")
+
+def enviar_un_mensaje_telegram(texto_mensaje, url_compra=None, url_cesta_directa=None):
     url_api = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     payload = {
         "chat_id": CHAT_ID,
-        "text": mensaje,
-        "parse_mode": "HTML"
+        "text": texto_mensaje,
+        "parse_mode": "HTML",
+        "disable_notification": False
     }
     if url_compra:
-        payload["reply_markup"] = {
-            "inline_keyboard": [[{"text": "🛒 ABRIR TIENDA Y COMPRAR", "url": url_compra}]]
-        }
+        botones = []
+        if url_cesta_directa:
+            botones.append([{"text": "⚡ AÑADIR DIRECTO A LA CESTA (1 CLIC)", "url": url_cesta_directa}])
+        botones.append([{"text": "🛒 ABRIR TIENDA Y COMPRAR", "url": url_compra}])
+        payload["reply_markup"] = {"inline_keyboard": botones}
 
     for intento in range(2):
         try:
             r = requests.post(url_api, json=payload, timeout=10)
             if r.status_code == 200:
-                break
+                datos = r.json()
+                return datos.get("result", {}).get("message_id")
         except Exception as e:
             print(f"Error al enviar Telegram (intento {intento + 1}): {e}")
             time.sleep(1)
+    return None
+
+def avisar_telegram(mensaje, url_compra=None, url_cesta_directa=None, alarma_combate=False):
+    if not alarma_combate:
+        enviar_un_mensaje_telegram(mensaje, url_compra, url_cesta_directa)
+        return
+
+    # MODO ALARMA DE COMBATE (3 avisos seguidos + mensaje fijado en el chat)
+    primer_id = None
+    for num_alerta in range(1, 4):
+        encabezado_rafaga = f"🚨 <b>¡HAY STOCK CONFIRMADO! (Alerta {num_alerta}/3)</b> 🚨"
+        mensaje_rafaga = mensaje.replace("🚨 <b>¡HAY STOCK CONFIRMADO!</b> 🚨", encabezado_rafaga)
+        msg_id = enviar_un_mensaje_telegram(mensaje_rafaga, url_compra, url_cesta_directa)
+        if num_alerta == 1 and msg_id:
+            primer_id = msg_id
+            fijar_mensaje_telegram(primer_id)
+        if num_alerta < 3:
+            time.sleep(3)
 
 def boton_esta_activo(boton):
     if not boton:
         return False
-    # Ignorar botones dentro de carruseles de productos relacionados o recomendados
     if boton.find_parent(class_=re.compile(r"related|recommend|upsell|cross-sell|carousel|slider|similar", re.I)):
         return False
     clases = " ".join(boton.get("class", [])).lower()
@@ -289,6 +373,29 @@ def es_pantalla_antibot(html, titulo_pagina):
     es_bloqueo_corto = len(html) < 15000 and any(b in html for b in ["captcha-delivery.com", "cf-browser-verification", "validatecaptcha", "api-services-support@amazon.com"])
     return es_bloqueo_titulo or es_bloqueo_corto
 
+def realizar_peticion(sesion, url, requiere_proxy, proxies_peticion):
+    for intento in range(2):
+        try:
+            if requiere_proxy:
+                navegador = "safari17_0" if any(t in url for t in ["pccomponentes.com", "carrefour.es", "amazon.es", "caseking.es"]) else "chrome124"
+                resp = requests.get(url, headers=HEADERS, proxies=proxies_peticion, impersonate=navegador, timeout=12)
+                if resp.status_code == 403 or "validatecaptcha" in resp.text.lower():
+                    time.sleep(1)
+                    navegador_alt = "chrome124" if navegador == "safari17_0" else "safari17_0"
+                    resp = requests.get(url, headers=HEADERS, proxies=proxies_peticion, impersonate=navegador_alt, timeout=12)
+                return resp
+            else:
+                resp = sesion.get(url, headers=HEADERS, timeout=12)
+                if resp.status_code in [403, 429, 503] and PROXY_URL:
+                    proxies_emergencia = {"http": PROXY_URL, "https": PROXY_URL}
+                    resp = requests.get(url, headers=HEADERS, proxies=proxies_emergencia, impersonate="safari17_0", timeout=12)
+                return resp
+        except Exception as e:
+            if intento == 0:
+                time.sleep(1)
+            else:
+                raise e
+
 def verificar_articulo(sesion, producto):
     nombre = producto["nombre"]
     url = producto["url"]
@@ -301,18 +408,12 @@ def verificar_articulo(sesion, producto):
         return False
 
     try:
-        if requiere_proxy:
-            navegador = "safari17_0" if any(t in url for t in ["pccomponentes.com", "carrefour.es", "amazon.es", "caseking.es"]) else "chrome124"
-            respuesta = requests.get(url, headers=HEADERS, proxies=proxies_peticion, impersonate=navegador, timeout=12)
-            if respuesta.status_code == 403 or "validatecaptcha" in respuesta.text.lower():
-                time.sleep(1)
-                navegador_alt = "chrome124" if navegador == "safari17_0" else "safari17_0"
-                respuesta = requests.get(url, headers=HEADERS, proxies=proxies_peticion, impersonate=navegador_alt, timeout=12)
-        else:
-            respuesta = sesion.get(url, headers=HEADERS, timeout=12)
-            if respuesta.status_code in [403, 429, 503] and PROXY_URL:
-                proxies_emergencia = {"http": PROXY_URL, "https": PROXY_URL}
-                respuesta = requests.get(url, headers=HEADERS, proxies=proxies_emergencia, impersonate="safari17_0", timeout=12)
+        respuesta = realizar_peticion(sesion, url, requiere_proxy, proxies_peticion)
+
+        if respuesta.status_code in [407, 402]:
+            stats["errores_proxy_407"] += 1
+            print(f"[{nombre}] Error {respuesta.status_code}: Proxy sin saldo o credenciales rechazadas.")
+            return False
 
         if respuesta.status_code != 200:
             print(f"[{nombre}] HTTP {respuesta.status_code}. Saltando.")
@@ -323,7 +424,6 @@ def verificar_articulo(sesion, producto):
         titulo_pagina = soup.title.get_text(strip=True).lower() if soup.title else ""
 
         if es_pantalla_antibot(html, titulo_pagina):
-            # Si una tienda gratuita puso pantalla anti-bot, reintentamos con el proxy
             if not requiere_proxy and PROXY_URL:
                 proxies_emergencia = {"http": PROXY_URL, "https": PROXY_URL}
                 respuesta = requests.get(url, headers=HEADERS, proxies=proxies_emergencia, impersonate="safari17_0", timeout=12)
@@ -333,8 +433,13 @@ def verificar_articulo(sesion, producto):
                     titulo_pagina = soup.title.get_text(strip=True).lower() if soup.title else ""
 
             if es_pantalla_antibot(html, titulo_pagina):
+                stats["antibot"] += 1
                 print(f"[{nombre}] Pantalla anti-bot temporal. Saltando.")
                 return False
+
+        stats["revisados_ok"] += 1
+        if requiere_proxy:
+            stats["proxy_ok"] += 1
 
         hay_stock = False
 
@@ -382,7 +487,7 @@ def verificar_articulo(sesion, producto):
             if boton_cesta and not bloque_agotado:
                 hay_stock = True
 
-        # 6. Regla Grandes Superficies, Shopify y Tiendas Especializadas (ECI, MediaMarkt, PcComponentes, Coolmod, Carrefour, Nintendo, Caseking, Mielectro, HíperOcio, Baba)
+        # 6. Regla Grandes Superficies, Shopify y Tiendas Especializadas
         elif any(t in url for t in ["elcorteingles.es", "mediamarkt.es", "pccomponentes.com", "coolmod.com", "carrefour.es", "store.nintendo.com", "caseking.es", "mielectro.es", "hiperocio.com", "baba.es"]):
             botones_candidatos = soup.find_all(
                 ["button", "a", "input"],
@@ -405,12 +510,29 @@ def verificar_articulo(sesion, producto):
         if hay_stock:
             print(f"¡¡¡STOCK REAL CONFIRMADO EN: {nombre}!!!")
             if url not in avisados_en_este_turno:
+                icono = obtener_icono_categoria(nombre)
+                precio_detectado = extraer_precio(soup, respuesta.text)
+                hora_es = datetime.now(ZONA_MADRID).strftime("%H:%M:%S")
+
+                url_cesta_amazon = None
+                if "amazon.es/dp/" in url:
+                    asin = url.split("/dp/")[1].split("/")[0].split("?")[0]
+                    url_cesta_amazon = f"https://www.amazon.es/gp/aws/cart/add.html?ASIN.1={asin}&Quantity.1=1"
+
                 mensaje = (
                     f"🚨 <b>¡HAY STOCK CONFIRMADO!</b> 🚨\n\n"
-                    f"🎮 <b>{nombre}</b>\n\n"
+                    f"{icono} <b>{nombre}</b>\n"
+                    f"💰 <b>Precio detectado:</b> {precio_detectado}\n"
+                    f"🕒 <b>Hora (ES):</b> {hora_es}\n\n"
                     f"🔗 {url}"
                 )
-                avisar_telegram(mensaje, url_compra=url)
+                # Alarma de combate activada para los 3 productos (Consola, Mando y Funda)
+                avisar_telegram(
+                    mensaje,
+                    url_compra=url,
+                    url_cesta_directa=url_cesta_amazon,
+                    alarma_combate=True
+                )
                 avisados_en_este_turno.add(url)
             return True
         else:
@@ -418,8 +540,14 @@ def verificar_articulo(sesion, producto):
             return False
 
     except Exception as e:
+        err_texto = str(e).lower()
+        if requiere_proxy and any(k in err_texto for k in ["407", "proxy", "connect", "tunnel"]):
+            stats["errores_red_proxy"] += 1
         print(f"[{nombre}] Error de conexión: {e}")
         return False
+
+inicio_barrido = time.time()
+ahora_madrid = datetime.now(ZONA_MADRID)
 
 if MODO_PRUEBA:
     estado_proxy = "Conectado y listo" if PROXY_URL else "No configurado (modo gratuito activo)"
@@ -431,17 +559,35 @@ if MODO_PRUEBA:
         url_compra="https://theshopgamer.com"
     )
 
-# 1 sola pasada completa por ejecución para duplicar la duración del proxy
 total_rondas = 1
 
 with requests.Session(impersonate="chrome124") as sesion:
     for ronda in range(total_rondas):
-        hora = time.strftime("%H:%M:%S")
-        print(f"\n--- [{hora}] Ronda {ronda + 1}/{total_rondas} ---")
+        hora_log = ahora_madrid.strftime("%H:%M:%S")
+        print(f"\n--- [{hora_log} ES] Ronda {ronda + 1}/{total_rondas} ---")
 
         for prod in PRODUCTOS:
             verificar_articulo(sesion, prod)
             time.sleep(random.uniform(0.8, 1.5))
 
-        if ronda < total_rondas - 1:
-            time.sleep(15)
+duracion_seg = int(time.time() - inicio_barrido)
+
+# 1. Alerta automática si el proxy de IPRoyal se queda sin megas o se cae
+# (Se envía en el turno de en punto :00 a :14 para no repetir cada 15 min)
+fallo_critico_proxy = stats["errores_proxy_407"] > 0 or (stats["proxy_ok"] == 0 and stats["errores_red_proxy"] >= 5)
+if fallo_critico_proxy and (0 <= ahora_madrid.minute < 15):
+    avisar_telegram(
+        "⚠️ <b>¡ALERTA DE PROXY IPROYAL!</b> ⚠️\n\n"
+        "El proxy no responde o <b>se te han agotado los megas del Giga</b>.\n"
+        "Las 19 tiendas gratuitas siguen vigiladas, pero las 23 grandes superficies no pueden comprobarse hasta que revises tu saldo en IPRoyal."
+    )
+
+# 2. Informe diario de supervivencia en el turno de las 11:50 AM (ventana 11:45 a 11:59 hora de Madrid)
+if ahora_madrid.hour == 11 and (45 <= ahora_madrid.minute <= 59):
+    avisar_telegram(
+        f"☀️ <b>Parte Diario (11:50): Bot Switch 2 en guardia</b>\n\n"
+        f"🛡️ <b>Tiendas verificadas hoy:</b> {stats['revisados_ok']}/{len(PRODUCTOS)}\n"
+        f"📡 <b>Grandes superficies con Proxy:</b> {stats['proxy_ok']}/23 operativas\n"
+        f"⏱️ <b>Tiempo de barrido:</b> {duracion_seg} segundos\n\n"
+        f"<i>Seguimos vigilando en silencio cada 15 minutos con Alarma de Combate activa.</i>"
+    )
