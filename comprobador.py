@@ -75,8 +75,68 @@ PRODUCTOS = [
         "url": "https://www.todoconsolas.com/accesorios-switch-2/215838-mando_pro_controller_edicion_zelda_40_aniversario_btr_switch_2_280598-045496322229.html",
         "usar_proxy": False
     },
+    {
+        "nombre": "Videodis - Nintendo Switch 2 Edición Zelda",
+        "url": "https://videodis.es/consolas/50622-preventa-consiola-nintendo-switch-2-disponible-el-05062025.html",
+        "usar_proxy": False
+    },
+    {
+        "nombre": "Videodis - Mando Zelda 40 Aniversario",
+        "url": "https://videodis.es/juegos/50076-reserva-funda-y-protector-de-pantalla-edicion-zelda-40th-switch-2-disponible-el-29102026.html",
+        "usar_proxy": False
+    },
+    {
+        "nombre": "Videodis - Funda Zelda 40 Aniversario",
+        "url": "https://videodis.es/juegos/50075-reserva-funda-y-protector-de-pantalla-edicion-zelda-40th-switch-2-disponible-el-29102026.html",
+        "usar_proxy": False
+    },
+    {
+        "nombre": "HíperOcio - Nintendo Switch 2 Edición Zelda",
+        "url": "https://hiperocio.com/products/nintendo-switch-2-edicion-zelda-40-aniversario",
+        "usar_proxy": False
+    },
+    {
+        "nombre": "HíperOcio - Mando Zelda 40 Aniversario",
+        "url": "https://hiperocio.com/products/mando-pro-nintendo-switch-2-zelda-40-aniversario",
+        "usar_proxy": False
+    },
+    {
+        "nombre": "Baba - Funda Zelda 40 Aniversario",
+        "url": "https://www.baba.es/es/sw2-bolsa-transporte-protector-de-pantalla-zelda-40-aniversario/41903",
+        "usar_proxy": False
+    },
+    {
+        "nombre": "Baba - Nintendo Switch 2 Edición Zelda",
+        "url": "https://www.baba.es/es/sw-consola-nintendo-switch-2-/41902",
+        "usar_proxy": False
+    },
+    {
+        "nombre": "Baba - Mando Zelda 40 Aniversario (Ficha 1)",
+        "url": "https://www.baba.es/es/sw2-mando-pro-wireless-resident-evil-requiem-edition/42352",
+        "usar_proxy": False
+    },
+    {
+        "nombre": "Baba - Mando Zelda 40 Aniversario (Ficha 2)",
+        "url": "https://www.baba.es/es/sw2-mando-pro-wireless-resident-evil-requiem-edition/41901",
+        "usar_proxy": False
+    },
 
     # --- GRANDES SUPERFICIES (usar_proxy: True -> CON PROXY ESPAÑOL) ---
+    {
+        "nombre": "Amazon - Nintendo Switch 2 Edición Zelda",
+        "url": "https://www.amazon.es/dp/B0F2TN43GH",
+        "usar_proxy": True
+    },
+    {
+        "nombre": "Amazon - Mando Zelda 40 Aniversario",
+        "url": "https://www.amazon.es/dp/B0F2T6WM33",
+        "usar_proxy": True
+    },
+    {
+        "nombre": "Amazon - Funda Zelda 40 Aniversario",
+        "url": "https://www.amazon.es/dp/B0HJ89X1VQ",
+        "usar_proxy": True
+    },
     {
         "nombre": "ECI - Nintendo Switch 2 Edición Zelda",
         "url": "https://www.elcorteingles.es/videojuegos/A202302815-nintendo-switch-2-edicion-zelda-40-aniversario/",
@@ -156,6 +216,26 @@ PRODUCTOS = [
         "nombre": "Nintendo - Funda Zelda 40 Aniversario",
         "url": "https://store.nintendo.com/es-es/funda-edicin-40-aniversario-de-the-legend-of-zelda-y-protector-de-pantalla-de-nintendo-switch-2-000000000010019439",
         "usar_proxy": True
+    },
+    {
+        "nombre": "Caseking - Nintendo Switch 2 Edición Zelda",
+        "url": "https://www.caseking.es/consola-nintendo-switch-2-the-legend-of-zelda-40th-anniversary-edition/10019448.html",
+        "usar_proxy": True
+    },
+    {
+        "nombre": "Caseking - Mando Zelda 40 Aniversario",
+        "url": "https://www.caseking.es/gamepad-nintendo-switch-2-pro-controller-the-legend-of-zelda-40th-anniversary-edition/10019438.html",
+        "usar_proxy": True
+    },
+    {
+        "nombre": "Caseking - Funda Zelda 40 Aniversario",
+        "url": "https://www.caseking.es/bolsa-nintendo-switch-2-carrying-case-the-legend-of-zelda-40th-anniversary-edition/10019439.html",
+        "usar_proxy": True
+    },
+    {
+        "nombre": "Mielectro - Nintendo Switch 2 Edición Zelda",
+        "url": "https://www.mielectro.es/nintendo-switch-2-edicion-legend-of-zelda-31391071/",
+        "usar_proxy": True
     }
 ]
 # =================================================
@@ -186,15 +266,28 @@ def avisar_telegram(mensaje, url_compra=None):
 def boton_esta_activo(boton):
     if not boton:
         return False
-    clases = " ".join(boton.get("class", [])).lower()
-    if boton.has_attr("disabled") or "disabled" in clases or "out-of-stock" in clases:
+    # Ignorar botones dentro de carruseles de productos relacionados o recomendados
+    if boton.find_parent(class_=re.compile(r"related|recommend|upsell|cross-sell|carousel|slider|similar", re.I)):
         return False
-    texto = boton.get_text(strip=True).lower()
+    clases = " ".join(boton.get("class", [])).lower()
+    if boton.has_attr("disabled") or "disabled" in clases or "out-of-stock" in clases or boton.get("aria-disabled") == "true":
+        return False
+    texto = (
+        boton.get_text(" ", strip=True) + " " +
+        boton.get("value", "") + " " +
+        boton.get("title", "") + " " +
+        boton.get("aria-label", "")
+    ).lower()
     palabras_compra = ["comprar", "reservar", "añadir", "cesta", "carrito"]
     palabras_agotado = ["agotado", "sin stock", "no disponible", "avísame", "avisarme", "avisadme", "sin existencias", "registrar"]
     tiene_accion = any(p in texto for p in palabras_compra)
     esta_agotado = any(p in texto for p in palabras_agotado)
     return tiene_accion and not esta_agotado
+
+def es_pantalla_antibot(html, titulo_pagina):
+    es_bloqueo_titulo = any(b in titulo_pagina for b in ["just a moment", "un momento", "access denied", "attention required", "you have been blocked", "robot check"])
+    es_bloqueo_corto = len(html) < 15000 and any(b in html for b in ["captcha-delivery.com", "cf-browser-verification", "validatecaptcha", "api-services-support@amazon.com"])
+    return es_bloqueo_titulo or es_bloqueo_corto
 
 def verificar_articulo(sesion, producto):
     nombre = producto["nombre"]
@@ -209,10 +302,9 @@ def verificar_articulo(sesion, producto):
 
     try:
         if requiere_proxy:
-            # PcComponentes y Carrefour abren mejor entrando directamente con perfil Safari
-            navegador = "safari17_0" if any(t in url for t in ["pccomponentes.com", "carrefour.es"]) else "chrome124"
+            navegador = "safari17_0" if any(t in url for t in ["pccomponentes.com", "carrefour.es", "amazon.es", "caseking.es"]) else "chrome124"
             respuesta = requests.get(url, headers=HEADERS, proxies=proxies_peticion, impersonate=navegador, timeout=12)
-            if respuesta.status_code == 403:
+            if respuesta.status_code == 403 or "validatecaptcha" in respuesta.text.lower():
                 time.sleep(1)
                 navegador_alt = "chrome124" if navegador == "safari17_0" else "safari17_0"
                 respuesta = requests.get(url, headers=HEADERS, proxies=proxies_peticion, impersonate=navegador_alt, timeout=12)
@@ -220,7 +312,7 @@ def verificar_articulo(sesion, producto):
             respuesta = sesion.get(url, headers=HEADERS, timeout=12)
             if respuesta.status_code in [403, 429, 503] and PROXY_URL:
                 proxies_emergencia = {"http": PROXY_URL, "https": PROXY_URL}
-                respuesta = requests.get(url, headers=HEADERS, proxies=proxies_emergencia, impersonate="chrome124", timeout=12)
+                respuesta = requests.get(url, headers=HEADERS, proxies=proxies_emergencia, impersonate="safari17_0", timeout=12)
 
         if respuesta.status_code != 200:
             print(f"[{nombre}] HTTP {respuesta.status_code}. Saltando.")
@@ -230,18 +322,24 @@ def verificar_articulo(sesion, producto):
         soup = BeautifulSoup(respuesta.text, "html.parser")
         titulo_pagina = soup.title.get_text(strip=True).lower() if soup.title else ""
 
-        # Comprobación precisa de pantallas de bloqueo reales (sin falsas alarmas por scripts de fondo)
-        es_bloqueo_titulo = any(b in titulo_pagina for b in ["just a moment", "un momento", "access denied", "attention required", "you have been blocked"])
-        es_bloqueo_corto = len(html) < 15000 and any(b in html for b in ["captcha-delivery.com", "cf-browser-verification"])
+        if es_pantalla_antibot(html, titulo_pagina):
+            # Si una tienda gratuita puso pantalla anti-bot, reintentamos con el proxy
+            if not requiere_proxy and PROXY_URL:
+                proxies_emergencia = {"http": PROXY_URL, "https": PROXY_URL}
+                respuesta = requests.get(url, headers=HEADERS, proxies=proxies_emergencia, impersonate="safari17_0", timeout=12)
+                if respuesta.status_code == 200:
+                    html = respuesta.text.lower()
+                    soup = BeautifulSoup(respuesta.text, "html.parser")
+                    titulo_pagina = soup.title.get_text(strip=True).lower() if soup.title else ""
 
-        if es_bloqueo_titulo or es_bloqueo_corto:
-            print(f"[{nombre}] Pantalla anti-bot temporal. Saltando.")
-            return False
+            if es_pantalla_antibot(html, titulo_pagina):
+                print(f"[{nombre}] Pantalla anti-bot temporal. Saltando.")
+                return False
 
         hay_stock = False
 
-        # 1. Regla PrestaShop (The Shop Gamer, TodoConsolas)
-        if any(t in url for t in ["theshopgamer.com", "todoconsolas.com"]):
+        # 1. Regla PrestaShop (The Shop Gamer, TodoConsolas, Videodis)
+        if any(t in url for t in ["theshopgamer.com", "todoconsolas.com", "videodis.es"]):
             boton = soup.find("button", {"data-button-action": "add-to-cart"}) or soup.find("button", id="add_to_cart") or soup.find("button", class_=re.compile(r"add-to-cart", re.I))
             bloque_stock = soup.find(id="product-availability") or soup.find(id="availability_statut")
             texto_stock = bloque_stock.get_text(strip=True).lower() if bloque_stock else ""
@@ -276,14 +374,25 @@ def verificar_articulo(sesion, producto):
             if boton_esta_activo(boton):
                 hay_stock = True
 
-        # 5. Regla Grandes Superficies y My Nintendo Store (ECI, MediaMarkt, PcComponentes, Coolmod, Carrefour, Nintendo)
-        elif any(t in url for t in ["elcorteingles.es", "mediamarkt.es", "pccomponentes.com", "coolmod.com", "carrefour.es", "store.nintendo.com"]):
+        # 5. Regla Amazon España
+        elif "amazon.es" in url:
+            caja_compra = soup.find("div", id=re.compile(r"desktop_buybox|buybox", re.I)) or soup
+            boton_cesta = caja_compra.find(["input", "button"], id=re.compile(r"add-to-cart-button|buy-now-button", re.I))
+            bloque_agotado = soup.find("div", id="outOfStock")
+            if boton_cesta and not bloque_agotado:
+                hay_stock = True
+
+        # 6. Regla Grandes Superficies, Shopify y Tiendas Especializadas (ECI, MediaMarkt, PcComponentes, Coolmod, Carrefour, Nintendo, Caseking, Mielectro, HíperOcio, Baba)
+        elif any(t in url for t in ["elcorteingles.es", "mediamarkt.es", "pccomponentes.com", "coolmod.com", "carrefour.es", "store.nintendo.com", "caseking.es", "mielectro.es", "hiperocio.com", "baba.es"]):
             botones_candidatos = soup.find_all(
-                ["button", "a"],
-                attrs={"id": re.compile(r"add-cart|add-to-cart|buy-button|pdp-add", re.I)}
+                ["button", "a", "input"],
+                attrs={"id": re.compile(r"add-cart|add-to-cart|buy-button|pdp-add|btn-comprar", re.I)}
             ) + soup.find_all(
-                ["button", "a"],
-                class_=re.compile(r"add-to-cart|add-to-basket|buy-button|btn-buy|js-add-to-cart|c_button--primary", re.I)
+                ["button", "a", "input"],
+                class_=re.compile(r"add-to-cart|add-to-basket|buy-button|btn-buy|btn-comprar|js-add-to-cart|c_button--primary|product-form__submit|add-cart", re.I)
+            ) + soup.find_all(
+                "button",
+                attrs={"name": re.compile(r"^add$|add-to-cart", re.I)}
             ) + soup.find_all(
                 "button",
                 attrs={"data-test": re.compile(r"a2c-Button|add-to-cart", re.I)}
@@ -322,7 +431,7 @@ if MODO_PRUEBA:
         url_compra="https://theshopgamer.com"
     )
 
-# 1 sola pasada completa por ejecución para duplicar la duración del proxy (7-10 días por GB)
+# 1 sola pasada completa por ejecución para duplicar la duración del proxy
 total_rondas = 1
 
 with requests.Session(impersonate="chrome124") as sesion:
