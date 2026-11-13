@@ -18,7 +18,7 @@ concurrency:
 jobs:
   comprobar:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 5
 
     steps:
       - name: Descargar código
