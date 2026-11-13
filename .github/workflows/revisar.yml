@@ -1,15 +1,7 @@
 name: Monitor de Stock Switch 2
 
 on:
-  schedule:
-    - cron: '*/5 * * * *'
   workflow_dispatch:
-    inputs:
-      probar_telegram:
-        description: 'Enviar mensaje de prueba a Telegram para verificar conexión'
-        required: false
-        default: false
-        type: boolean
 
 concurrency:
   group: monitor-stock-switch2
@@ -19,9 +11,8 @@ jobs:
   comprobar:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-
     steps:
-      - name: Descargar código
+      - name: Descargar codigo
         uses: actions/checkout@v4
 
       - name: Configurar Python
@@ -29,7 +20,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Instalar librerías necesarias
+      - name: Instalar librerias
         run: pip install -q --no-cache-dir beautifulsoup4 curl_cffi
 
       - name: Ejecutar comprobador
@@ -37,5 +28,4 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           PROXY_URL: ${{ secrets.PROXY_URL }}
-          MODO_PRUEBA: ${{ inputs.probar_telegram }}
         run: python comprobador.py
