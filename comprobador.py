@@ -593,4 +593,145 @@ def verificar_articulo(producto):
             etiqueta_agotado = ficha.find(class_=re.compile(r"out-of-stock", re.I))
             texto_ficha = etiqueta_agotado.get_text(strip=True).lower() if etiqueta_agotado else ""
             dice_sin_stock = any(p in texto_ficha for p in ["sin existencias", "agotado", "fuera de stock"])
-            clases_boton = " ".join(boton.get("class", [])).lower() if boton else
+            clases_boton = " ".join(boton.get("class", [])).lower() if boton else ""
+            desactivado = (boton.has_attr("disabled") or "disabled" in clases_boton or elemento_oculto(boton)) if boton else True
+            if boton and not desactivado and not dice_sin_stock:
+                hay_stock = True
+
+        # 3. Regla Xtralife
+        elif "xtralife.com" in url:
+            boton_compra = soup.find(["button", "a"], class_=re.compile(r"btn-buy|btn-reserve|add-to-cart", re.I))
+            if boton_esta_activo(boton_compra):
+                hay_stock = True
+
+        # 4. Regla GAME España
+        elif "game.es" in url:
+            panel_compra = soup.find("div", class_=re.compile(r"buy-panel|product-buy", re.I)) or soup
+            boton = panel_compra.find(["a", "button"], class_=re.compile(r"btn-buy|buy-button|cm-btn-buy", re.I))
+            if boton_esta_activo(boton):
+                hay_stock = True
+
+        # 5. Regla Amazon España
+        elif "amazon.es" in url:
+            caja_compra = soup.find("div", id=re.compile(r"desktop_buybox|buybox", re.I)) or soup
+            boton_cesta = caja_compra.find(["input", "button"], id=re.compile(r"add-to-cart-button|buy-now-button", re.I))
+            bloque_agotado = soup.find("div", id="outOfStock")
+            ver_opciones = soup.find(id="buybox-see-all-buying-choices")
+            if boton_cesta and not elemento_oculto(boton_cesta) and not bloque_agotado and not ver_opciones:
+                hay_stock = True
+
+        # 6. Regla Grandes Superficies, Shopify y Tiendas Especializadas
+        elif any(t in url for t in ["elcorteingles.es", "mediamarkt.es", "pccomponentes.com", "coolmod.com", "carrefour.es", "store.nintendo.com", "caseking.es", "mielectro.es", "hiperocio.com", "baba.es"]):
+            botones_candidatos = soup.find_all(
+                ["button", "a", "input"],
+                attrs={"id": re.compile(r"add-cart|add-to-cart|buy-button|pdp-add|btn-comprar", re.I)}
+            ) + soup.find_all(
+                ["button", "a", "input"],
+                class_=re.compile(r"add-to-cart|add-to-basket|buy-button|btn-buy|btn-comprar|js-add-to-cart|c_button--primary|product-form__submit|add-cart", re.I)
+            ) + soup.find_all(
+                "button",
+                attrs={"name": re.compile(r"^add$|add-to-cart", re.I)}
+            ) + soup.find_all(
+                "button",
+                attrs={"data-test": re.compile(r"a2c-Button|add-to-cart", re.I)}
+            )
+            for b in botones_candidatos:
+                if boton_esta_activo(b):
+                    hay_stock = True
+                    break
+
+        if hay_stock:
+            with candado_stats:
+                ya_avisado = url in avisados_en_este_turno
+                if not ya_avisado:
+                    avisados_en_este_turno.add(url)
+
+            if not ya_avisado:
+                icono = obtener_icono_categoria(nombre)
+                precio_detectado = extraer_precio(soup, respuesta.text)
+                hora_es = datetime.now(ZONA_MADRID).strftime("%H:%M:%S")
+
+                url_cesta_amazon = None
+                if "amazon.es/dp/" in url:
+                    asin = url.split("/dp/")[1].split("/")[0].split("?")[0]
+                    url_cesta_amazon = f"https://www.amazon.es/gp/aws/cart/add.html?ASIN.1={asin}&Quantity.1=1"
+
+                mensaje = (
+                    f"🚨 <b>¡HAY STOCK CONFIRMADO!</b> 🚨\n\n"
+                    f"{icono} <b>{nombre}</b>\n"
+                    f"💰 <b>Precio detectado:</b> {precio_detectado}\n"
+                    f"🕒 <b>Hora (ES):</b> {hora_es}\n\n"
+                    f"🔗 {url}"
+                )
+                avisar_telegram(
+                    mensaje,
+                    url_compra=url,
+                    url_cesta_directa=url_cesta_amazon,
+                    alarma_combate=True
+                )
+            return f"¡¡¡STOCK REAL CONFIRMADO EN: {nombre}!!!"
+        else:
+            return f"[{nombre}] Sigue agotado."
+
+    except Exception as e:
+        err_texto = str(e).lower()
+        if requiere_proxy and any(k in err_texto for k in ["407", "proxy", "connect", "tunnel"]):
+            with candado_stats:
+                stats["errores_red_proxy"] += 1
+        return f"[{nombre}] Error de conexión tras 5 intentos: {e}"
+
+# ================= EJECUCIÓN PRINCIPAL =================
+inicio_barrido = time.time()
+ahora_madrid = datetime.now(ZONA_MADRID)
+
+if MODO_PRUEBA:
+    estado_proxy = "Conectado y listo" if PROXY_URL else "No configurado (modo gratuito activo)"
+    print("Enviando mensaje de prueba a Telegram...")
+    avisar_telegram(
+        f"✅ <b>Bot Switch 2 operativo</b>\n\n"
+        f"📡 <b>Estado del Proxy:</b> {estado_proxy}\n"
+        f"🛡️ Vigilando {len(PRODUCTOS)} artículos correctamente.",
+        url_compra="https://theshopgamer.com"
+    )
+
+hora_log = ahora_madrid.strftime("%H:%M:%S")
+print(f"\n--- [{hora_log} ES] Ronda 1/1 (Motor Paralelo 4x Activo) ---")
+
+# Intercalamos tiendas distintas para maximizar la velocidad sin golpear el mismo dominio a la vez
+resultados_ordenados = [None] * len(PRODUCTOS)
+with ThreadPoolExecutor(max_workers=4) as executor:
+    futuros = {executor.submit(verificar_articulo, prod): idx for idx, prod in enumerate(PRODUCTOS)}
+    for futuro in as_completed(futuros):
+        idx = futuros[futuro]
+        try:
+            resultados_ordenados[idx] = futuro.result()
+        except Exception as exc:
+            resultados_ordenados[idx] = f"[{PRODUCTOS[idx]['nombre']}] Error inesperado: {exc}"
+
+for linea in resultados_ordenados:
+    if linea:
+        print(linea)
+
+duracion_seg = int(time.time() - inicio_barrido)
+print(f"\n--- Barrido completado en {duracion_seg}s | Verificados: {stats['revisados_ok']}/{len(PRODUCTOS)} (Recuperados en reintento: {stats['reintentos_recuperados']}) ---")
+
+# 1. Alerta automática si el proxy de IPRoyal se queda sin megas (407) o cae al 100%
+fallo_critico_proxy = stats["errores_proxy_407"] > 0 or (stats["proxy_ok"] == 0 and stats["errores_red_proxy"] >= 15)
+if fallo_critico_proxy and (0 <= ahora_madrid.minute < 15):
+    avisar_telegram(
+        "⚠️ <b>¡ALERTA DE PROXY IPROYAL!</b> ⚠️\n\n"
+        "El proxy no responde o <b>se te han agotado los megas del Giga</b>.\n"
+        "Las 19 tiendas gratuitas siguen vigiladas, pero las 23 grandes superficies no pueden comprobarse hasta que revises tu saldo en IPRoyal."
+    )
+
+# 2. Informe diario de supervivencia en el turno de las 11:50 AM (ventana 11:45 a 11:59 hora de Madrid)
+if ahora_madrid.hour == 11 and (45 <= ahora_madrid.minute <= 59):
+    avisar_telegram(
+        f"☀️ <b>Parte Diario (11:50): Bot Switch 2 en guardia</b>\n\n"
+        f"🛡️ <b>Total tiendas verificadas:</b> {stats['revisados_ok']}/{len(PRODUCTOS)}\n"
+        f"🆓 <b>Tiendas sin proxy:</b> {stats['gratis_ok']}/19 operativas\n"
+        f"📡 <b>Grandes superficies (Proxy):</b> {stats['proxy_ok']}/23 operativas\n"
+        f"🔄 <b>Nodos recuperados al vuelo:</b> {stats['reintentos_recuperados']}\n"
+        f"⚡ <b>Tiempo récord de barrido:</b> {duracion_seg} segundos\n\n"
+        f"<i>Seguimos vigilando en silencio con Alarma de Combate (x3 + mensaje fijado) activa.</i>"
+    )
