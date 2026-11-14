@@ -483,8 +483,6 @@ def es_pantalla_antibot(html, titulo_pagina):
 def construir_proxy_intento(proxy_base, intento):
     if not proxy_base:
         return None
-    # Si el usuario usa sesión fija (_session-xxxx), cambiamos el ID en los reintentos.
-    # Si usa proxy rotatorio estándar de IPRoyal, cerrar la conexión TCP ya asigna una IP nueva sola.
     if intento > 0 and "_session-" in proxy_base:
         nuevo_id = "".join(random.choices(string.ascii_lowercase + string.digits, k=8))
         proxy_mod = re.sub(r"_session-[a-zA-Z0-9]+", f"_session-{nuevo_id}", proxy_base)
@@ -802,16 +800,18 @@ print(
 )
 
 # 4. Alerta automática si el proxy de IPRoyal se queda sin megas (407) o cae al 100%
+# Ventana de 0 a 4 min (compatible con relojes de 5 min y 10 min para enviar 1 sola alerta por hora)
 fallo_critico_proxy = errores_407 > 0 or (proxy_ok == 0 and errores_red_proxy >= 15)
-if fallo_critico_proxy and (0 <= ahora_madrid.minute < 15):
+if fallo_critico_proxy and (0 <= ahora_madrid.minute <= 4):
     avisar_telegram(
         "⚠️ <b>¡ALERTA DE PROXY IPROYAL!</b> ⚠️\n\n"
         "El proxy no responde o <b>se te han agotado los megas del Giga</b>.\n"
         "Las 19 tiendas gratuitas siguen vigiladas, pero las 23 grandes superficies no pueden comprobarse hasta que revises tu saldo en IPRoyal."
     )
 
-# 5. Informe diario de supervivencia en el turno de las 11:50 AM (ventana 11:45 a 11:59 hora de Madrid)
-if ahora_madrid.hour == 11 and (45 <= ahora_madrid.minute <= 59):
+# 5. Informe diario de supervivencia clavado en la pasada de las 11:50 AM (hora de Madrid)
+# Ventana de 50 a 54 min (compatible con relojes de 5 min y 10 min para enviar 1 único informe al día)
+if ahora_madrid.hour == 11 and (50 <= ahora_madrid.minute <= 54):
     avisar_telegram(
         f"☀️ <b>Parte Diario (11:50): Bot Switch 2 en guardia</b>\n\n"
         f"🛡️ <b>Total tiendas verificadas:</b> {revisados_ok}/{len(PRODUCTOS)}\n"
