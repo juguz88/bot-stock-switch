@@ -267,7 +267,6 @@ def obtener_icono_categoria(nombre):
 
 def extraer_precio(soup, html_raw):
     try:
-        # 1. Buscar en etiquetas meta estándar (OpenGraph / Schema)
         meta_precio = (
             soup.find("meta", {"property": "product:price:amount"}) or
             soup.find("meta", {"property": "og:price:amount"}) or
@@ -278,14 +277,12 @@ def extraer_precio(soup, html_raw):
             if re.match(r"^\d+([.,]\d{1,2})?$", valor):
                 return f"{valor} €"
 
-        # 2. Buscar en bloques JSON-LD de la tienda
         for script in soup.find_all("script", type="application/ld+json"):
             texto_json = script.string or ""
             m = re.search(r'"price"\s*:\s*"?(\d{2,3}(?:[.,]\d{1,2})?)"?', texto_json)
             if m:
                 return f"{m.group(1).replace('.', ',')} €"
 
-        # 3. Búsqueda visual rápida de precio en euros
         m_euro = re.search(r'(\d{2,3}[.,]\d{2})\s*€', soup.get_text(" ", strip=True))
         if m_euro:
             return f"{m_euro.group(1)} €"
@@ -336,7 +333,6 @@ def avisar_telegram(mensaje, url_compra=None, url_cesta_directa=None, alarma_com
         enviar_un_mensaje_telegram(mensaje, url_compra, url_cesta_directa)
         return
 
-    # MODO ALARMA DE COMBATE (3 avisos seguidos + mensaje fijado en el chat)
     primer_id = None
     for num_alerta in range(1, 4):
         encabezado_rafaga = f"🚨 <b>¡HAY STOCK CONFIRMADO! (Alerta {num_alerta}/3)</b> 🚨"
@@ -374,25 +370,34 @@ def es_pantalla_antibot(html, titulo_pagina):
     return es_bloqueo_titulo or es_bloqueo_corto
 
 def realizar_peticion(sesion, url, requiere_proxy, proxies_peticion):
-    for intento in range(2):
+    # Hasta 4 intentos automáticos para rotar de IP si un nodo residencial da Error 500
+    max_intentos = 4 if requiere_proxy else 2
+    for intento in range(max_intentos):
         try:
             if requiere_proxy:
                 navegador = "safari17_0" if any(t in url for t in ["pccomponentes.com", "carrefour.es", "amazon.es", "caseking.es"]) else "chrome124"
+                if intento % 2 == 1:
+                    navegador = "chrome124" if navegador == "safari17_0" else "safari17_0"
                 resp = requests.get(url, headers=HEADERS, proxies=proxies_peticion, impersonate=navegador, timeout=12)
                 if resp.status_code == 403 or "validatecaptcha" in resp.text.lower():
-                    time.sleep(1)
+                    time.sleep(1.2)
                     navegador_alt = "chrome124" if navegador == "safari17_0" else "safari17_0"
                     resp = requests.get(url, headers=HEADERS, proxies=proxies_peticion, impersonate=navegador_alt, timeout=12)
                 return resp
             else:
                 resp = sesion.get(url, headers=HEADERS, timeout=12)
                 if resp.status_code in [403, 429, 503] and PROXY_URL:
-                    proxies_emergencia = {"http": PROXY_URL, "https": PROXY_URL}
-                    resp = requests.get(url, headers=HEADERS, proxies=proxies_emergencia, impersonate="safari17_0", timeout=12)
+                    for _ in range(2):
+                        try:
+                            proxies_emergencia = {"http": PROXY_URL, "https": PROXY_URL}
+                            resp = requests.get(url, headers=HEADERS, proxies=proxies_emergencia, impersonate="safari17_0", timeout=12)
+                            break
+                        except Exception:
+                            time.sleep(1.2)
                 return resp
         except Exception as e:
-            if intento == 0:
-                time.sleep(1)
+            if intento < max_intentos - 1:
+                time.sleep(1.5)
             else:
                 raise e
 
@@ -425,12 +430,17 @@ def verificar_articulo(sesion, producto):
 
         if es_pantalla_antibot(html, titulo_pagina):
             if not requiere_proxy and PROXY_URL:
-                proxies_emergencia = {"http": PROXY_URL, "https": PROXY_URL}
-                respuesta = requests.get(url, headers=HEADERS, proxies=proxies_emergencia, impersonate="safari17_0", timeout=12)
-                if respuesta.status_code == 200:
-                    html = respuesta.text.lower()
-                    soup = BeautifulSoup(respuesta.text, "html.parser")
-                    titulo_pagina = soup.title.get_text(strip=True).lower() if soup.title else ""
+                for _ in range(2):
+                    try:
+                        proxies_emergencia = {"http": PROXY_URL, "https": PROXY_URL}
+                        respuesta = requests.get(url, headers=HEADERS, proxies=proxies_emergencia, impersonate="safari17_0", timeout=12)
+                        if respuesta.status_code == 200:
+                            html = respuesta.text.lower()
+                            soup = BeautifulSoup(respuesta.text, "html.parser")
+                            titulo_pagina = soup.title.get_text(strip=True).lower() if soup.title else ""
+                        break
+                    except Exception:
+                        time.sleep(1.2)
 
             if es_pantalla_antibot(html, titulo_pagina):
                 stats["antibot"] += 1
@@ -526,7 +536,6 @@ def verificar_articulo(sesion, producto):
                     f"🕒 <b>Hora (ES):</b> {hora_es}\n\n"
                     f"🔗 {url}"
                 )
-                # Alarma de combate activada para los 3 productos (Consola, Mando y Funda)
                 avisar_telegram(
                     mensaje,
                     url_compra=url,
@@ -572,8 +581,7 @@ with requests.Session(impersonate="chrome124") as sesion:
 
 duracion_seg = int(time.time() - inicio_barrido)
 
-# 1. Alerta automática si el proxy de IPRoyal se queda sin megas o se cae
-# (Se envía en el turno de en punto :00 a :14 para no repetir cada 15 min)
+# 1. Alerta automática si el proxy de IPRoyal se queda sin megas o se cae por completo
 fallo_critico_proxy = stats["errores_proxy_407"] > 0 or (stats["proxy_ok"] == 0 and stats["errores_red_proxy"] >= 5)
 if fallo_critico_proxy and (0 <= ahora_madrid.minute < 15):
     avisar_telegram(
