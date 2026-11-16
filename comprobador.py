@@ -25,6 +25,11 @@ CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 PROXY_URL = os.environ.get("PROXY_URL", "").strip()
 MODO_PRUEBA = False
 
+# Topes máximos de precio permitidos (en euros)
+PRECIO_MAX_CONSOLA = 600.0
+PRECIO_MAX_MANDO = 150.0
+PRECIO_MAX_FUNDA = 50.0
+
 HEADERS_BASE = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "Accept-Language": "es-ES,es;q=0.9",
@@ -309,7 +314,15 @@ def obtener_icono_categoria(nombre):
         return "🕹️"
     return "🎮"
 
-def extraer_precio_y_alerta_reventa(nombre, soup):
+def obtener_tope_precio(nombre):
+    n = nombre.lower()
+    if "funda" in n or "bolsa" in n:
+        return PRECIO_MAX_FUNDA
+    elif "mando" in n or "controller" in n:
+        return PRECIO_MAX_MANDO
+    return PRECIO_MAX_CONSOLA
+
+def analizar_precio_y_filtro(nombre, soup):
     precio_num = None
     precio_str = "Ver en tienda"
     try:
@@ -327,7 +340,7 @@ def extraer_precio_y_alerta_reventa(nombre, soup):
         if precio_num is None:
             for script in soup.find_all("script", type="application/ld+json"):
                 texto_json = script.string or ""
-                m = re.search(r'"price"\s*:\s*"?(\d{2,3}(?:[.,]\d{1,2})?)"?', texto_json)
+                m = re.search(r'"price"\s*:\s*"?(\d{1,4}(?:[.,]\d{1,2})?)"?', texto_json)
                 if m:
                     val_limpio = m.group(1).replace(",", ".")
                     precio_num = float(val_limpio)
@@ -335,7 +348,11 @@ def extraer_precio_y_alerta_reventa(nombre, soup):
                     break
 
         if precio_num is None:
-            m_euro = re.search(r'(\d{2,3}[.,]\d{2})\s*€', soup.get_text(" ", strip=True))
+            soup_limpio = BeautifulSoup(str(soup), "html.parser")
+            for bloque in soup_limpio.find_all(class_=re.compile(r"related|recommend|upsell|cross-sell|carousel|slider|similar|accessories|bundle|footer", re.I)):
+                bloque.decompose()
+
+            m_euro = re.search(r'(\d{1,4}[.,]\d{2})\s*€', soup_limpio.get_text(" ", strip=True))
             if m_euro:
                 val_limpio = m_euro.group(1).replace(",", ".")
                 precio_num = float(val_limpio)
@@ -343,17 +360,12 @@ def extraer_precio_y_alerta_reventa(nombre, soup):
     except Exception:
         pass
 
-    aviso_reventa = ""
-    if precio_num is not None:
-        n = nombre.lower()
-        if ("funda" in n or "bolsa" in n) and precio_num > 50:
-            aviso_reventa = " ⚠️ <i>(OJO: Posible reventa / precio inflado)</i>"
-        elif ("mando" in n or "controller" in n) and precio_num > 115:
-            aviso_reventa = " ⚠️ <i>(OJO: Posible reventa / precio inflado)</i>"
-        elif ("consola" in n or "edición zelda" in n) and precio_num > 599:
-            aviso_reventa = " ⚠️ <i>(OJO: Posible reventa / precio inflado)</i>"
+    tope_maximo = obtener_tope_precio(nombre)
+    dentro_de_presupuesto = True
+    if precio_num is not None and precio_num > tope_maximo:
+        dentro_de_presupuesto = False
 
-    return f"{precio_str}{aviso_reventa}"
+    return precio_num, precio_str, dentro_de_presupuesto, tope_maximo
 
 def generar_url_cesta_directa(url, soup):
     try:
@@ -542,7 +554,6 @@ def realizar_peticion(url, requiere_proxy, proxy_base, es_rescate=False):
             if intento < max_intentos - 1:
                 time.sleep(1.5 + (intento * 0.4))
 
-    # Salvavidas sin coste: si los nodos del proxy fallan por túnel 500, probamos 1 acceso directo limpio
     if requiere_proxy:
         try:
             resp_directa = requests.get(url, headers=headers_peticion, impersonate="safari17_0", timeout=10)
@@ -560,7 +571,6 @@ def realizar_peticion(url, requiere_proxy, proxy_base, es_rescate=False):
     return RespuestaVacia(), False
 
 def evaluar_reglas_stock(url, soup):
-    # 1. Regla PrestaShop (The Shop Gamer, TodoConsolas, Videodis)
     if any(t in url for t in ["theshopgamer.com", "todoconsolas.com", "videodis.es"]):
         boton = soup.find("button", {"data-button-action": "add-to-cart"}) or soup.find("button", id="add_to_cart") or soup.find("button", class_=re.compile(r"add-to-cart", re.I))
         bloque_stock = soup.find(id="product-availability") or soup.find(id="availability_statut")
@@ -570,7 +580,6 @@ def evaluar_reglas_stock(url, soup):
         dice_agotado = any(p in texto_stock for p in ["agotado", "no disponible", "sin stock", "fuera de stock", "avísame"])
         return bool(boton and not desactivado and not dice_agotado)
 
-    # 2. Regla WooCommerce (Impact Game)
     if "impactgame.es" in url:
         ficha = soup.find("div", class_=re.compile(r"summary|product-info|product-main", re.I)) or soup
         boton = ficha.find("button", {"name": "add-to-cart"}) or ficha.find(class_=re.compile(r"single_add_to_cart_button", re.I))
@@ -581,18 +590,15 @@ def evaluar_reglas_stock(url, soup):
         desactivado = (boton.has_attr("disabled") or "disabled" in clases_boton or elemento_oculto(boton)) if boton else True
         return bool(boton and not desactivado and not dice_sin_stock)
 
-    # 3. Regla Xtralife
     if "xtralife.com" in url:
         boton_compra = soup.find(["button", "a"], class_=re.compile(r"btn-buy|btn-reserve|add-to-cart", re.I))
         return boton_esta_activo(boton_compra)
 
-    # 4. Regla GAME España
     if "game.es" in url:
         panel_compra = soup.find("div", class_=re.compile(r"buy-panel|product-buy", re.I)) or soup
         boton = panel_compra.find(["a", "button"], class_=re.compile(r"btn-buy|buy-button|cm-btn-buy", re.I))
         return boton_esta_activo(boton)
 
-    # 5. Regla Amazon España
     if "amazon.es" in url:
         caja_compra = soup.find("div", id=re.compile(r"desktop_buybox|buybox", re.I)) or soup
         boton_cesta = caja_compra.find(["input", "button"], id=re.compile(r"add-to-cart-button|buy-now-button", re.I))
@@ -600,11 +606,10 @@ def evaluar_reglas_stock(url, soup):
         ver_opciones = soup.find(id="buybox-see-all-buying-choices")
         return bool(boton_cesta and not elemento_oculto(boton_cesta) and not bloque_agotado and not ver_opciones)
 
-    # 6. Regla Grandes Superficies, Shopify y Tiendas Especializadas
     if any(t in url for t in ["elcorteingles.es", "mediamarkt.es", "pccomponentes.com", "coolmod.com", "carrefour.es", "store.nintendo.com", "caseking.es", "mielectro.es", "hiperocio.com", "baba.es"]):
         botones_candidatos = soup.find_all(
             ["button", "a", "input"],
-            attrs={"id": re.compile(r"add-cart|add-to-cart|buy-button|pdp-add|btn-comprar", re.I)}
+            attrs={"id": re.compile(r"add-cart|add-to-cart|buy-button|pdp-add|btn-comprar", re.I))}
         ) + soup.find_all(
             ["button", "a", "input"],
             class_=re.compile(r"add-to-cart|add-to-basket|buy-button|btn-buy|btn-comprar|js-add-to-cart|c_button--primary|product-form__submit|add-cart", re.I)
@@ -684,6 +689,12 @@ def verificar_articulo(producto, es_rescate=False):
         hay_stock = evaluar_reglas_stock(url, soup)
 
         if hay_stock:
+            precio_num, precio_detectado, dentro_de_presupuesto, tope_max = analizar_precio_y_filtro(nombre, soup)
+
+            if not dentro_de_presupuesto:
+                res["linea"] = f"[{nombre}] Stock descartado por sobreprecio: {precio_detectado} (Máx: {int(tope_max)} €)."
+                return res
+
             with candado_avisos:
                 ya_avisado = url in avisados_en_este_turno
                 if not ya_avisado:
@@ -691,7 +702,6 @@ def verificar_articulo(producto, es_rescate=False):
 
             if not ya_avisado:
                 icono = obtener_icono_categoria(nombre)
-                precio_detectado = extraer_precio_y_alerta_reventa(nombre, soup)
                 hora_es = datetime.now(ZONA_MADRID).strftime("%H:%M:%S")
                 url_cesta_directa = generar_url_cesta_directa(url, soup)
 
@@ -708,7 +718,7 @@ def verificar_articulo(producto, es_rescate=False):
                     url_cesta_directa=url_cesta_directa,
                     alarma_combate=True
                 )
-            res["linea"] = f"¡¡¡STOCK REAL CONFIRMADO EN: {nombre}!!!"
+            res["linea"] = f"¡¡¡STOCK REAL CONFIRMADO EN: {nombre} ({precio_detectado})!!!"
         else:
             res["linea"] = f"[{nombre}] Sigue agotado."
         return res
@@ -730,14 +740,13 @@ if MODO_PRUEBA:
     avisar_telegram(
         f"✅ <b>Bot Switch 2 operativo</b>\n\n"
         f"📡 <b>Estado del Proxy:</b> {estado_proxy}\n"
-        f"🛡️ Vigilando {len(PRODUCTOS)} artículos correctamente.",
+        f"🛡️ Vigilando {len(PRODUCTOS)} artículos con filtro de precio máximo.",
         url_compra="https://theshopgamer.com"
     )
 
 hora_log = ahora_madrid.strftime("%H:%M:%S")
-print(f"\n--- [{hora_log} ES] Ronda 1/1 (Motor Paralelo Balanceado + Onda de Rescate) ---")
+print(f"\n--- [{hora_log} ES] Ronda 1/1 (Motor Paralelo Balanceado + Filtro Precios Máximos) ---")
 
-# 1. Primera Onda Paralela con balanceo de dominios
 cola_balanceada = intercalar_por_dominio(PRODUCTOS)
 resultados_finales = [None] * len(PRODUCTOS)
 
@@ -758,7 +767,6 @@ with ThreadPoolExecutor(max_workers=4) as executor:
                 "antibot": False
             }
 
-# 2. Onda de Rescate Automática para tiendas que hayan sufrido microcortes (Error 500 / Timeout)
 indices_fallidos = [
     idx for idx, r in enumerate(resultados_finales)
     if r and not r["ok"] and not r["error_407"]
@@ -780,7 +788,6 @@ if indices_fallidos:
             except Exception:
                 pass
 
-# 3. Impresión ordenada (1 al 42) y cálculo limpio de telemetría
 revisados_ok = sum(1 for r in resultados_finales if r["ok"])
 gratis_ok = sum(1 for r in resultados_finales if r["ok"] and not r["requiere_proxy"])
 proxy_ok = sum(1 for r in resultados_finales if r["ok"] and r["requiere_proxy"])
@@ -799,18 +806,14 @@ print(
     f"(Gratis: {gratis_ok}/19 | Proxy: {proxy_ok}/23 | Recuperados: {recuperados}) ---"
 )
 
-# 4. Alerta automática si el proxy de IPRoyal se queda sin megas (407) o cae al 100%
-# Ventana de 0 a 4 min (compatible con relojes de 5 min y 10 min para enviar 1 sola alerta por hora)
 fallo_critico_proxy = errores_407 > 0 or (proxy_ok == 0 and errores_red_proxy >= 15)
 if fallo_critico_proxy and (0 <= ahora_madrid.minute <= 4):
     avisar_telegram(
-        "⚠️ <b>¡ALERTA DE PROXY IPROYAL!</b> ⚠️\n\n"
-        "El proxy no responde o <b>se te han agotado los megas del Giga</b>.\n"
-        "Las 19 tiendas gratuitas siguen vigiladas, pero las 23 grandes superficies no pueden comprobarse hasta que revises tu saldo en IPRoyal."
+        "⚠️ <b>¡ALERTA DE PROXY DATAIMPULSE!</b> ⚠️\n\n"
+        "El proxy no responde o <b>se te han agotado los megas del bono</b>.\n"
+        "Las 19 tiendas gratuitas siguen vigiladas, pero las 23 grandes superficies no pueden comprobarse hasta que revises tu saldo."
     )
 
-# 5. Informe diario de supervivencia clavado en la pasada de las 11:50 AM (hora de Madrid)
-# Ventana de 50 a 54 min (compatible con relojes de 5 min y 10 min para enviar 1 único informe al día)
 if ahora_madrid.hour == 11 and (50 <= ahora_madrid.minute <= 54):
     avisar_telegram(
         f"☀️ <b>Parte Diario (11:50): Bot Switch 2 en guardia</b>\n\n"
@@ -819,5 +822,5 @@ if ahora_madrid.hour == 11 and (50 <= ahora_madrid.minute <= 54):
         f"📡 <b>Grandes superficies (Proxy):</b> {proxy_ok}/23 operativas\n"
         f"🔄 <b>Microcortes recuperados al vuelo:</b> {recuperados}\n"
         f"⚡ <b>Tiempo total de barrido:</b> {duracion_seg} segundos\n\n"
-        f"<i>Vigilancia activa con Alarma de Combate (x3 + mensaje fijado) y Escudo Anti-Reventa.</i>"
+        f"<i>Vigilancia activa con Alarma de Combate (x3 + mensaje fijado) y Filtro de Precio Máximo (600€/150€/50€).</i>"
     )
