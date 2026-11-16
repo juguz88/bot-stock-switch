@@ -25,7 +25,7 @@ CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 PROXY_URL = os.environ.get("PROXY_URL", "").strip()
 MODO_PRUEBA = False
 
-# Topes máximos de precio permitidos (en euros)
+# Topes máximos de precio permitidos (en euros) - ESTRICTOS
 PRECIO_MAX_CONSOLA = 600.0
 PRECIO_MAX_MANDO = 150.0
 PRECIO_MAX_FUNDA = 50.0
@@ -326,6 +326,7 @@ def analizar_precio_y_filtro(nombre, soup):
     precio_num = None
     precio_str = "Ver en tienda"
     try:
+        # Búsqueda segura en Metaetiquetas
         meta_precio = (
             soup.find("meta", {"property": "product:price:amount"}) or
             soup.find("meta", {"property": "og:price:amount"}) or
@@ -337,6 +338,7 @@ def analizar_precio_y_filtro(nombre, soup):
                 precio_num = float(val_limpio)
                 precio_str = f"{val_limpio.replace('.', ',')} €"
 
+        # Búsqueda segura en JSON-LD si el meta falla
         if precio_num is None:
             for script in soup.find_all("script", type="application/ld+json"):
                 texto_json = script.string or ""
@@ -347,16 +349,26 @@ def analizar_precio_y_filtro(nombre, soup):
                     precio_str = f"{m.group(1).replace('.', ',')} €"
                     break
 
+        # Búsqueda directa en el texto HTML limpiando bloques basura de recomendaciones
         if precio_num is None:
             soup_limpio = BeautifulSoup(str(soup), "html.parser")
-            for bloque in soup_limpio.find_all(class_=re.compile(r"related|recommend|upsell|cross-sell|carousel|slider|similar|accessories|bundle|footer", re.I)):
+            for bloque in soup_limpio.find_all(class_=re.compile(r"related|recommend|upsell|cross-sell|carousel|slider|similar|accessories|bundle|footer|nav|header", re.I)):
                 bloque.decompose()
 
-            m_euro = re.search(r'(\d{1,4}[.,]\d{2})\s*€', soup_limpio.get_text(" ", strip=True))
-            if m_euro:
-                val_limpio = m_euro.group(1).replace(",", ".")
-                precio_num = float(val_limpio)
-                precio_str = f"{m_euro.group(1)} €"
+            # Regex estricto para evitar capturar números que no sean precios reales de producto
+            candidatos_euros = re.findall(r'(\d{1,3}(?:\.\d{3})*[.,]\d{2})\s*€', soup_limpio.get_text(" ", strip=True))
+            for cand in candidatos_euros:
+                val_limpio = cand.replace(".", "").replace(",", ".")
+                try:
+                    num_val = float(val_limpio)
+                    tope_revision = obtener_tope_precio(nombre)
+                    # Solo aceptamos el precio si está dentro de un rango lógico de mercado para evitar falsos positivos
+                    if 5.0 <= num_val <= tope_revision * 1.1:
+                        precio_num = num_val
+                        precio_str = f"{cand} €"
+                        break
+                except Exception:
+                    continue
     except Exception:
         pass
 
@@ -609,7 +621,7 @@ def evaluar_reglas_stock(url, soup):
     if any(t in url for t in ["elcorteingles.es", "mediamarkt.es", "pccomponentes.com", "coolmod.com", "carrefour.es", "store.nintendo.com", "caseking.es", "mielectro.es", "hiperocio.com", "baba.es"]):
         botones_candidatos = soup.find_all(
             ["button", "a", "input"],
-            attrs={"id": re.compile(r"add-cart|add-to-cart|buy-button|pdp-add|btn-comprar", re.I))}
+            attrs={"id": re.compile(r"add-cart|add-to-cart|buy-button|pdp-add|btn-comprar", re.I)}
         ) + soup.find_all(
             ["button", "a", "input"],
             class_=re.compile(r"add-to-cart|add-to-basket|buy-button|btn-buy|btn-comprar|js-add-to-cart|c_button--primary|product-form__submit|add-cart", re.I)
@@ -642,7 +654,7 @@ def verificar_articulo(producto, es_rescate=False):
     }
 
     if requiere_proxy and not PROXY_URL:
-        res["linea"] = f"[{nombre}] Aviso: requiere proxy pero PROXY_URL no está configurado."
+        res["linea"] = f"[{nombre}] Aviso: requiere proxy pero PROXY_URL não está configurado."
         return res
 
     try:
@@ -691,8 +703,10 @@ def verificar_articulo(producto, es_rescate=False):
         if hay_stock:
             precio_num, precio_detectado, dentro_de_presupuesto, tope_max = analizar_precio_y_filtro(nombre, soup)
 
-            if not dentro_de_presupuesto:
-                res["linea"] = f"[{nombre}] Stock descartado por sobreprecio: {precio_detectado} (Máx: {int(tope_max)} €)."
+            # BLOQUEO DE SEGURIDAD ABSOLUTA: Si no detecta precio válido o supera el presupuesto, NUNCA avisa a Telegram
+            if precio_num is None or not dentro_de_presupuesto:
+                motivo = f"Precio detectado ({precio_detectado}) excede el máx de {int(tope_max)}€" if precio_num is not None else "No se pudo leer un precio válido en web"
+                res["linea"] = f"[{nombre}] Stock descartado por seguridad ({motivo})."
                 return res
 
             with candado_avisos:
