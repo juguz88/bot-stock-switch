@@ -25,7 +25,7 @@ CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 PROXY_URL = os.environ.get("PROXY_URL", "").strip()
 MODO_PRUEBA = False
 
-# Topes máximos de precio permitidos (en euros) - ESTRICTOS
+# Topes máximos de precio permitidos (en euros)
 PRECIO_MAX_CONSOLA = 600.0
 PRECIO_MAX_MANDO = 150.0
 PRECIO_MAX_FUNDA = 50.0
@@ -314,69 +314,161 @@ def obtener_icono_categoria(nombre):
         return "🕹️"
     return "🎮"
 
-def obtener_tope_precio(nombre):
+def obtener_limites_precio(nombre):
     n = nombre.lower()
     if "funda" in n or "bolsa" in n:
-        return PRECIO_MAX_FUNDA
+        return 15.0, PRECIO_MAX_FUNDA
     elif "mando" in n or "controller" in n:
-        return PRECIO_MAX_MANDO
-    return PRECIO_MAX_CONSOLA
+        return 50.0, PRECIO_MAX_MANDO
+    return 350.0, PRECIO_MAX_CONSOLA
+
+def convertir_precio_a_float(texto_precio):
+    if not texto_precio:
+        return None
+    limpio = re.sub(r"[^\d.,]", "", str(texto_precio).strip())
+    if not limpio:
+        return None
+    if "." in limpio and "," in limpio:
+        if limpio.rfind(",") > limpio.rfind("."):
+            limpio = limpio.replace(".", "").replace(",", ".")
+        else:
+            limpio = limpio.replace(",", "")
+    elif "," in limpio:
+        partes = limpio.split(",")
+        if len(partes) == 2 and len(partes[1]) == 3 and len(partes[0]) <= 2:
+            limpio = limpio.replace(",", "")
+        else:
+            limpio = limpio.replace(",", ".")
+    elif "." in limpio:
+        partes = limpio.split(".")
+        if len(partes) > 2 or (len(partes) == 2 and len(partes[1]) == 3 and len(partes[0]) <= 2):
+            limpio = limpio.replace(".", "")
+    try:
+        return round(float(limpio), 2)
+    except Exception:
+        return None
+
+def formatear_euros(valor_float):
+    return f"{valor_float:.2f}".replace(".", ",") + " €"
 
 def analizar_precio_y_filtro(nombre, soup):
+    precio_min, tope_maximo = obtener_limites_precio(nombre)
     precio_num = None
     precio_str = "Ver en tienda"
-    try:
-        # Búsqueda segura en Metaetiquetas
-        meta_precio = (
-            soup.find("meta", {"property": "product:price:amount"}) or
-            soup.find("meta", {"property": "og:price:amount"}) or
-            soup.find("meta", {"itemprop": "price"})
-        )
-        if meta_precio and meta_precio.get("content"):
-            val_limpio = meta_precio["content"].strip().replace(",", ".")
-            if re.match(r"^\d+(\.\d{1,2})?$", val_limpio):
-                precio_num = float(val_limpio)
-                precio_str = f"{val_limpio.replace('.', ',')} €"
 
-        # Búsqueda segura en JSON-LD si el meta falla
+    try:
+        # 1. Crear copia limpia del DOM sin cabeceras, pies, precios tachados, envíos ni widgets de cuotas
+        soup_limpio = BeautifulSoup(str(soup), "html.parser")
+        for tag_basura in soup_limpio.find_all(["header", "footer", "nav", "del", "s", "strike", "noscript", "template"]):
+            tag_basura.decompose()
+
+        patron_ruido = re.compile(
+            r"related|recommend|upsell|cross-sell|carousel|slider|similar|accessories|bundle|"
+            r"footer|header|nav|menu|cart|minicart|shipping|envio|delivery|finance|financia|"
+            r"sequra|klarna|aplazame|cetelem|cofidis|installment|cuota|old-price|regular-price|"
+            r"price-old|strike|tachado|discount|ahorro",
+            re.I
+        )
+        for bloque in soup_limpio.find_all(class_=patron_ruido):
+            bloque.decompose()
+        for bloque_id in soup_limpio.find_all(id=patron_ruido):
+            bloque_id.decompose()
+
+        # 2. Selectores prioritarios de caja de compra de Amazon (a-offscreen y entero + fracción)
+        for selector_amz in [
+            "#desktop_buybox .priceToPay .a-offscreen",
+            "#buybox .priceToPay .a-offscreen",
+            "#corePriceDisplay_desktop_feature_div .priceToPay .a-offscreen",
+            "#corePrice_feature_div .a-offscreen",
+            "#desktop_buybox .a-price .a-offscreen",
+            "#buybox .a-price .a-offscreen"
+        ]:
+            for nodo in soup_limpio.select(selector_amz):
+                val = convertir_precio_a_float(nodo.get_text(strip=True))
+                if val is not None and val >= precio_min:
+                    precio_num = val
+                    precio_str = formatear_euros(val)
+                    break
+            if precio_num is not None:
+                break
+
+        if precio_num is None:
+            for p_box in soup_limpio.select("#desktop_buybox .a-price, #buybox .a-price, #corePriceDisplay_desktop_feature_div .a-price, .a-price"):
+                entero = p_box.find(class_="a-price-whole")
+                fraccion = p_box.find(class_="a-price-fraction")
+                if entero:
+                    txt_ent = re.sub(r"[^\d]", "", entero.get_text(strip=True))
+                    txt_frac = re.sub(r"[^\d]", "", fraccion.get_text(strip=True)) if fraccion else "00"
+                    val = convertir_precio_a_float(f"{txt_ent},{txt_frac}")
+                    if val is not None and val >= precio_min:
+                        precio_num = val
+                        precio_str = formatear_euros(val)
+                        break
+
+        # 3. Metaetiquetas y atributos itemprop="price" (PrestaShop, WooCommerce, Shopify, Grandes Superficies)
+        if precio_num is None:
+            for attr in [
+                {"property": "product:price:amount"},
+                {"property": "og:price:amount"},
+                {"itemprop": "price"}
+            ]:
+                for tag_precio in soup_limpio.find_all(["meta", "span", "div", "ins", "p"], attr):
+                    raw_val = tag_precio.get("content") or tag_precio.get("data-price-amount") or tag_precio.get_text(strip=True)
+                    val = convertir_precio_a_float(raw_val)
+                    if val is not None and val >= precio_min:
+                        precio_num = val
+                        precio_str = formatear_euros(val)
+                        break
+                if precio_num is not None:
+                    break
+
+        # 4. Bloques estructurados JSON-LD (ignorando envíos o valores menores al mínimo de categoría)
         if precio_num is None:
             for script in soup.find_all("script", type="application/ld+json"):
                 texto_json = script.string or ""
-                m = re.search(r'"price"\s*:\s*"?(\d{1,4}(?:[.,]\d{1,2})?)"?', texto_json)
-                if m:
-                    val_limpio = m.group(1).replace(",", ".")
-                    precio_num = float(val_limpio)
-                    precio_str = f"{m.group(1).replace('.', ',')} €"
+                matches = re.findall(
+                    r'"price"\s*:\s*"?(\d{1,3}(?:[.,]\d{3})+(?:[.,]\d{1,4})?|\d+(?:[.,]\d{1,4})?)"?',
+                    texto_json
+                )
+                for m in matches:
+                    val = convertir_precio_a_float(m)
+                    if val is not None and val >= precio_min:
+                        precio_num = val
+                        precio_str = formatear_euros(val)
+                        break
+                if precio_num is not None:
                     break
 
-        # Búsqueda directa en el texto HTML limpiando bloques basura de recomendaciones
+        # 5. Búsqueda en texto visible del área de producto (descartando frases de envío o financiación)
         if precio_num is None:
-            soup_limpio = BeautifulSoup(str(soup), "html.parser")
-            for bloque in soup_limpio.find_all(class_=re.compile(r"related|recommend|upsell|cross-sell|carousel|slider|similar|accessories|bundle|footer|nav|header", re.I)):
-                bloque.decompose()
+            caja_producto = soup_limpio.find(
+                ["div", "section", "main"],
+                id=re.compile(r"desktop_buybox|buybox|product|main", re.I)
+            ) or soup_limpio.find(
+                ["div", "section", "main"],
+                class_=re.compile(r"summary|product-info|product-main|buy-panel|product-buy|product-detail", re.I)
+            )
+            zonas_busqueda = [caja_producto, soup_limpio] if caja_producto else [soup_limpio]
 
-            # Regex estricto para evitar capturar números que no sean precios reales de producto
-            candidatos_euros = re.findall(r'(\d{1,3}(?:\.\d{3})*[.,]\d{2})\s*€', soup_limpio.get_text(" ", strip=True))
-            for cand in candidatos_euros:
-                val_limpio = cand.replace(".", "").replace(",", ".")
-                try:
-                    num_val = float(val_limpio)
-                    tope_revision = obtener_tope_precio(nombre)
-                    # Solo aceptamos el precio si está dentro de un rango lógico de mercado para evitar falsos positivos
-                    if 5.0 <= num_val <= tope_revision * 1.1:
-                        precio_num = num_val
-                        precio_str = f"{cand} €"
+            for zona in zonas_busqueda:
+                texto_zona = zona.get_text(" ", strip=True)
+                for match in re.finditer(r'(\d{1,3}(?:\.\d{3})+,\d{2}|\d{1,4}[.,]\d{2})\s*€', texto_zona):
+                    inicio_ctx = max(0, match.start() - 35)
+                    fin_ctx = min(len(texto_zona), match.end() + 20)
+                    contexto = texto_zona[inicio_ctx:fin_ctx].lower()
+                    if any(p in contexto for p in ["envío", "envio", "gratis", "pedido", "cuota", "/mes", "plazo", "financia", "ahorr", "antes"]):
+                        continue
+                    val = convertir_precio_a_float(match.group(1))
+                    if val is not None and val >= precio_min:
+                        precio_num = val
+                        precio_str = formatear_euros(val)
                         break
-                except Exception:
-                    continue
+                if precio_num is not None:
+                    break
     except Exception:
         pass
 
-    tope_maximo = obtener_tope_precio(nombre)
-    dentro_de_presupuesto = True
-    if precio_num is not None and precio_num > tope_maximo:
-        dentro_de_presupuesto = False
-
+    dentro_de_presupuesto = (precio_num is not None) and (precio_num <= tope_maximo)
     return precio_num, precio_str, dentro_de_presupuesto, tope_maximo
 
 def generar_url_cesta_directa(url, soup):
@@ -566,6 +658,7 @@ def realizar_peticion(url, requiere_proxy, proxy_base, es_rescate=False):
             if intento < max_intentos - 1:
                 time.sleep(1.5 + (intento * 0.4))
 
+    # Salvavidas sin coste: si los nodos del proxy fallan por túnel 500, probamos 1 acceso directo limpio
     if requiere_proxy:
         try:
             resp_directa = requests.get(url, headers=headers_peticion, impersonate="safari17_0", timeout=10)
@@ -583,6 +676,7 @@ def realizar_peticion(url, requiere_proxy, proxy_base, es_rescate=False):
     return RespuestaVacia(), False
 
 def evaluar_reglas_stock(url, soup):
+    # 1. Regla PrestaShop (The Shop Gamer, TodoConsolas, Videodis)
     if any(t in url for t in ["theshopgamer.com", "todoconsolas.com", "videodis.es"]):
         boton = soup.find("button", {"data-button-action": "add-to-cart"}) or soup.find("button", id="add_to_cart") or soup.find("button", class_=re.compile(r"add-to-cart", re.I))
         bloque_stock = soup.find(id="product-availability") or soup.find(id="availability_statut")
@@ -592,6 +686,7 @@ def evaluar_reglas_stock(url, soup):
         dice_agotado = any(p in texto_stock for p in ["agotado", "no disponible", "sin stock", "fuera de stock", "avísame"])
         return bool(boton and not desactivado and not dice_agotado)
 
+    # 2. Regla WooCommerce (Impact Game)
     if "impactgame.es" in url:
         ficha = soup.find("div", class_=re.compile(r"summary|product-info|product-main", re.I)) or soup
         boton = ficha.find("button", {"name": "add-to-cart"}) or ficha.find(class_=re.compile(r"single_add_to_cart_button", re.I))
@@ -602,15 +697,18 @@ def evaluar_reglas_stock(url, soup):
         desactivado = (boton.has_attr("disabled") or "disabled" in clases_boton or elemento_oculto(boton)) if boton else True
         return bool(boton and not desactivado and not dice_sin_stock)
 
+    # 3. Regla Xtralife
     if "xtralife.com" in url:
         boton_compra = soup.find(["button", "a"], class_=re.compile(r"btn-buy|btn-reserve|add-to-cart", re.I))
         return boton_esta_activo(boton_compra)
 
+    # 4. Regla GAME España
     if "game.es" in url:
         panel_compra = soup.find("div", class_=re.compile(r"buy-panel|product-buy", re.I)) or soup
         boton = panel_compra.find(["a", "button"], class_=re.compile(r"btn-buy|buy-button|cm-btn-buy", re.I))
         return boton_esta_activo(boton)
 
+    # 5. Regla Amazon España
     if "amazon.es" in url:
         caja_compra = soup.find("div", id=re.compile(r"desktop_buybox|buybox", re.I)) or soup
         boton_cesta = caja_compra.find(["input", "button"], id=re.compile(r"add-to-cart-button|buy-now-button", re.I))
@@ -618,6 +716,7 @@ def evaluar_reglas_stock(url, soup):
         ver_opciones = soup.find(id="buybox-see-all-buying-choices")
         return bool(boton_cesta and not elemento_oculto(boton_cesta) and not bloque_agotado and not ver_opciones)
 
+    # 6. Regla Grandes Superficies, Shopify y Tiendas Especializadas
     if any(t in url for t in ["elcorteingles.es", "mediamarkt.es", "pccomponentes.com", "coolmod.com", "carrefour.es", "store.nintendo.com", "caseking.es", "mielectro.es", "hiperocio.com", "baba.es"]):
         botones_candidatos = soup.find_all(
             ["button", "a", "input"],
@@ -654,7 +753,7 @@ def verificar_articulo(producto, es_rescate=False):
     }
 
     if requiere_proxy and not PROXY_URL:
-        res["linea"] = f"[{nombre}] Aviso: requiere proxy pero PROXY_URL não está configurado."
+        res["linea"] = f"[{nombre}] Aviso: requiere proxy pero PROXY_URL no está configurado."
         return res
 
     try:
@@ -705,7 +804,7 @@ def verificar_articulo(producto, es_rescate=False):
 
             # BLOQUEO DE SEGURIDAD ABSOLUTA: Si no detecta precio válido o supera el presupuesto, NUNCA avisa a Telegram
             if precio_num is None or not dentro_de_presupuesto:
-                motivo = f"Precio detectado ({precio_detectado}) excede el máx de {int(tope_max)}€" if precio_num is not None else "No se pudo leer un precio válido en web"
+                motivo = f"Precio detectado ({precio_detectado}) excede el máx de {int(tope_max)} €" if precio_num is not None else "No se pudo leer un precio válido en web"
                 res["linea"] = f"[{nombre}] Stock descartado por seguridad ({motivo})."
                 return res
 
@@ -759,8 +858,9 @@ if MODO_PRUEBA:
     )
 
 hora_log = ahora_madrid.strftime("%H:%M:%S")
-print(f"\n--- [{hora_log} ES] Ronda 1/1 (Motor Paralelo Balanceado + Filtro Precios Máximos) ---")
+print(f"\n--- [{hora_log} ES] Ronda 1/1 (Motor Paralelo Balanceado + Onda de Rescate) ---")
 
+# 1. Primera Onda Paralela con balanceo de dominios
 cola_balanceada = intercalar_por_dominio(PRODUCTOS)
 resultados_finales = [None] * len(PRODUCTOS)
 
@@ -781,6 +881,7 @@ with ThreadPoolExecutor(max_workers=4) as executor:
                 "antibot": False
             }
 
+# 2. Onda de Rescate Automática para tiendas que hayan sufrido microcortes (Error 500 / Timeout)
 indices_fallidos = [
     idx for idx, r in enumerate(resultados_finales)
     if r and not r["ok"] and not r["error_407"]
@@ -802,6 +903,7 @@ if indices_fallidos:
             except Exception:
                 pass
 
+# 3. Impresión ordenada (1 al 42) y cálculo limpio de telemetría
 revisados_ok = sum(1 for r in resultados_finales if r["ok"])
 gratis_ok = sum(1 for r in resultados_finales if r["ok"] and not r["requiere_proxy"])
 proxy_ok = sum(1 for r in resultados_finales if r["ok"] and r["requiere_proxy"])
@@ -820,14 +922,18 @@ print(
     f"(Gratis: {gratis_ok}/19 | Proxy: {proxy_ok}/23 | Recuperados: {recuperados}) ---"
 )
 
+# 4. Alerta automática si el proxy de DataImpulse se queda sin megas (407) o cae al 100%
+# Ventana de 0 a 4 min (compatible con relojes de 5 min y 10 min para enviar 1 sola alerta por hora)
 fallo_critico_proxy = errores_407 > 0 or (proxy_ok == 0 and errores_red_proxy >= 15)
 if fallo_critico_proxy and (0 <= ahora_madrid.minute <= 4):
     avisar_telegram(
         "⚠️ <b>¡ALERTA DE PROXY DATAIMPULSE!</b> ⚠️\n\n"
         "El proxy no responde o <b>se te han agotado los megas del bono</b>.\n"
-        "Las 19 tiendas gratuitas siguen vigiladas, pero las 23 grandes superficies no pueden comprobarse hasta que revises tu saldo."
+        "Las 19 tiendas gratuitas siguen vigiladas, pero las 23 grandes superficies no pueden comprobarse hasta que revises tu saldo en DataImpulse."
     )
 
+# 5. Informe diario de supervivencia clavado en la pasada de las 11:50 AM (hora de Madrid)
+# Ventana de 50 a 54 min (compatible con relojes de 5 min y 10 min para enviar 1 único informe al día)
 if ahora_madrid.hour == 11 and (50 <= ahora_madrid.minute <= 54):
     avisar_telegram(
         f"☀️ <b>Parte Diario (11:50): Bot Switch 2 en guardia</b>\n\n"
