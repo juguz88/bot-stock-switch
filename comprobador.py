@@ -25,9 +25,14 @@ CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 PROXY_URL = os.environ.get("PROXY_URL", "").strip()
 MODO_PRUEBA = False
 
-# Topes máximos de precio permitidos (en euros)
+# Horquilla estricta de precios permitidos (en euros) - SOLO NUEVO A ESTRENAR
+PRECIO_MIN_CONSOLA = 515.0
 PRECIO_MAX_CONSOLA = 600.0
+
+PRECIO_MIN_MANDO = 95.0
 PRECIO_MAX_MANDO = 150.0
+
+PRECIO_MIN_FUNDA = 33.0
 PRECIO_MAX_FUNDA = 50.0
 
 HEADERS_BASE = {
@@ -315,12 +320,17 @@ def obtener_icono_categoria(nombre):
     return "🎮"
 
 def obtener_limites_precio(nombre):
+    """
+    Devuelve (suelo_antiruido_lectura, precio_min_permitido, precio_max_permitido).
+    - suelo_antiruido_lectura: ignora gastos de envío (3,99 €) o cuotas pequeñas,
+      pero permite leer precios rebajados de 2ª mano para descartarlos en el filtro.
+    """
     n = nombre.lower()
     if "funda" in n or "bolsa" in n:
-        return 15.0, PRECIO_MAX_FUNDA
+        return 12.0, PRECIO_MIN_FUNDA, PRECIO_MAX_FUNDA
     elif "mando" in n or "controller" in n:
-        return 50.0, PRECIO_MAX_MANDO
-    return 350.0, PRECIO_MAX_CONSOLA
+        return 35.0, PRECIO_MIN_MANDO, PRECIO_MAX_MANDO
+    return 200.0, PRECIO_MIN_CONSOLA, PRECIO_MAX_CONSOLA
 
 def convertir_precio_a_float(texto_precio):
     if not texto_precio:
@@ -335,13 +345,13 @@ def convertir_precio_a_float(texto_precio):
             limpio = limpio.replace(",", "")
     elif "," in limpio:
         partes = limpio.split(",")
-        if len(partes) == 2 and len(partes[1]) == 3 and len(partes[0]) <= 2:
+        if len(partes) == 2 and len(partes[1]) == 3 and len(partes[0]) == 1:
             limpio = limpio.replace(",", "")
         else:
             limpio = limpio.replace(",", ".")
     elif "." in limpio:
         partes = limpio.split(".")
-        if len(partes) > 2 or (len(partes) == 2 and len(partes[1]) == 3 and len(partes[0]) <= 2):
+        if len(partes) > 2 or (len(partes) == 2 and len(partes[1]) == 3 and len(partes[0]) == 1):
             limpio = limpio.replace(".", "")
     try:
         return round(float(limpio), 2)
@@ -352,40 +362,50 @@ def formatear_euros(valor_float):
     return f"{valor_float:.2f}".replace(".", ",") + " €"
 
 def analizar_precio_y_filtro(nombre, soup):
-    precio_min, tope_maximo = obtener_limites_precio(nombre)
+    suelo_lectura, precio_min, tope_maximo = obtener_limites_precio(nombre)
     precio_num = None
     precio_str = "Ver en tienda"
 
     try:
-        # 1. Crear copia limpia del DOM sin cabeceras, pies, precios tachados, envíos ni widgets de cuotas
+        # 1. Crear copia limpia del DOM eliminando precios tachados, widgets de cuotas, carruseles y 2ª mano
         soup_limpio = BeautifulSoup(str(soup), "html.parser")
         for tag_basura in soup_limpio.find_all(["header", "footer", "nav", "del", "s", "strike", "noscript", "template"]):
             tag_basura.decompose()
 
+        for strike_amz in soup_limpio.find_all(attrs={"data-a-strike": "true"}):
+            strike_amz.decompose()
+
         patron_ruido = re.compile(
-            r"related|recommend|upsell|cross-sell|carousel|slider|similar|accessories|bundle|"
-            r"footer|header|nav|menu|cart|minicart|shipping|envio|delivery|finance|financia|"
-            r"sequra|klarna|aplazame|cetelem|cofidis|installment|cuota|old-price|regular-price|"
-            r"price-old|strike|tachado|discount|ahorro",
+            r"related|recommend|upsell|cross-sell|crosssell|carousel|slider|similar|accessories|"
+            r"minicart|sequra|klarna|aplazame|cetelem|cofidis|installment|old-price|regular-price|"
+            r"price-old|was-price|a-text-price|usedBuySection|usedAccordionRow|olp_feature_div|"
+            r"preowned|seminuevo",
             re.I
         )
-        for bloque in soup_limpio.find_all(class_=patron_ruido):
-            bloque.decompose()
-        for bloque_id in soup_limpio.find_all(id=patron_ruido):
-            bloque_id.decompose()
+        for elem in list(soup_limpio.find_all(True)):
+            if not getattr(elem, "attrs", None):
+                continue
+            if elem.name in ["html", "head", "body", "main", "article"]:
+                continue
+            clases_str = " ".join(elem.get("class", []))
+            id_str = elem.get("id", "")
+            if patron_ruido.search(clases_str) or patron_ruido.search(id_str):
+                elem.decompose()
 
         # 2. Selectores prioritarios de caja de compra de Amazon (a-offscreen y entero + fracción)
         for selector_amz in [
             "#desktop_buybox .priceToPay .a-offscreen",
             "#buybox .priceToPay .a-offscreen",
             "#corePriceDisplay_desktop_feature_div .priceToPay .a-offscreen",
+            "#corePriceDisplay_desktop_feature_div .apexPriceToPay .a-offscreen",
             "#corePrice_feature_div .a-offscreen",
+            "#newAccordionRow .a-price .a-offscreen",
             "#desktop_buybox .a-price .a-offscreen",
             "#buybox .a-price .a-offscreen"
         ]:
             for nodo in soup_limpio.select(selector_amz):
                 val = convertir_precio_a_float(nodo.get_text(strip=True))
-                if val is not None and val >= precio_min:
+                if val is not None and val >= suelo_lectura:
                     precio_num = val
                     precio_str = formatear_euros(val)
                     break
@@ -400,39 +420,47 @@ def analizar_precio_y_filtro(nombre, soup):
                     txt_ent = re.sub(r"[^\d]", "", entero.get_text(strip=True))
                     txt_frac = re.sub(r"[^\d]", "", fraccion.get_text(strip=True)) if fraccion else "00"
                     val = convertir_precio_a_float(f"{txt_ent},{txt_frac}")
-                    if val is not None and val >= precio_min:
+                    if val is not None and val >= suelo_lectura:
                         precio_num = val
                         precio_str = formatear_euros(val)
                         break
 
-        # 3. Metaetiquetas y atributos itemprop="price" (PrestaShop, WooCommerce, Shopify, Grandes Superficies)
+        # 3. Metaetiquetas oficiales de cabecera y atributos itemprop="price" (PrestaShop, WooCommerce, Shopify, etc.)
         if precio_num is None:
             for attr in [
                 {"property": "product:price:amount"},
                 {"property": "og:price:amount"},
                 {"itemprop": "price"}
             ]:
-                for tag_precio in soup_limpio.find_all(["meta", "span", "div", "ins", "p"], attr):
-                    raw_val = tag_precio.get("content") or tag_precio.get("data-price-amount") or tag_precio.get_text(strip=True)
-                    val = convertir_precio_a_float(raw_val)
-                    if val is not None and val >= precio_min:
+                for meta_tag in soup_limpio.find_all("meta", attr):
+                    val = convertir_precio_a_float(meta_tag.get("content"))
+                    if val is not None and val >= suelo_lectura:
                         precio_num = val
                         precio_str = formatear_euros(val)
                         break
                 if precio_num is not None:
                     break
 
-        # 4. Bloques estructurados JSON-LD (ignorando envíos o valores menores al mínimo de categoría)
+        if precio_num is None:
+            for tag_precio in soup_limpio.find_all(["span", "div", "ins", "p"], {"itemprop": "price"}):
+                raw_val = tag_precio.get("content") or tag_precio.get("data-price-amount") or tag_precio.get_text(strip=True)
+                val = convertir_precio_a_float(raw_val)
+                if val is not None and val >= suelo_lectura:
+                    precio_num = val
+                    precio_str = formatear_euros(val)
+                    break
+
+        # 4. Bloques estructurados JSON-LD (compatible con decimales largos de PrestaShop como 39.990000)
         if precio_num is None:
             for script in soup.find_all("script", type="application/ld+json"):
-                texto_json = script.string or ""
+                texto_json = script.get_text() or ""
                 matches = re.findall(
-                    r'"price"\s*:\s*"?(\d{1,3}(?:[.,]\d{3})+(?:[.,]\d{1,4})?|\d+(?:[.,]\d{1,4})?)"?',
+                    r'"(?:price|lowPrice)"\s*:\s*"?(\d{1,3}(?:\.\d{3})+,\d{1,2}|\d+(?:[.,]\d{1,6})?)(?=["\s,}])',
                     texto_json
                 )
                 for m in matches:
                     val = convertir_precio_a_float(m)
-                    if val is not None and val >= precio_min:
+                    if val is not None and val >= suelo_lectura:
                         precio_num = val
                         precio_str = formatear_euros(val)
                         break
@@ -446,7 +474,7 @@ def analizar_precio_y_filtro(nombre, soup):
                 id=re.compile(r"desktop_buybox|buybox|product|main", re.I)
             ) or soup_limpio.find(
                 ["div", "section", "main"],
-                class_=re.compile(r"summary|product-info|product-main|buy-panel|product-buy|product-detail", re.I)
+                class_=re.compile(r"summary|product-info|product-main|buy-panel|product-buy|product-detail|product-prices", re.I)
             )
             zonas_busqueda = [caja_producto, soup_limpio] if caja_producto else [soup_limpio]
 
@@ -459,7 +487,7 @@ def analizar_precio_y_filtro(nombre, soup):
                     if any(p in contexto for p in ["envío", "envio", "gratis", "pedido", "cuota", "/mes", "plazo", "financia", "ahorr", "antes"]):
                         continue
                     val = convertir_precio_a_float(match.group(1))
-                    if val is not None and val >= precio_min:
+                    if val is not None and val >= suelo_lectura:
                         precio_num = val
                         precio_str = formatear_euros(val)
                         break
@@ -468,8 +496,8 @@ def analizar_precio_y_filtro(nombre, soup):
     except Exception:
         pass
 
-    dentro_de_presupuesto = (precio_num is not None) and (precio_num <= tope_maximo)
-    return precio_num, precio_str, dentro_de_presupuesto, tope_maximo
+    dentro_de_presupuesto = (precio_num is not None) and (precio_min <= precio_num <= tope_maximo)
+    return precio_num, precio_str, dentro_de_presupuesto, precio_min, tope_maximo
 
 def generar_url_cesta_directa(url, soup):
     try:
@@ -565,7 +593,9 @@ def elemento_oculto(elem):
 def boton_esta_activo(boton):
     if not boton or elemento_oculto(boton):
         return False
-    if boton.find_parent(class_=re.compile(r"related|recommend|upsell|cross-sell|carousel|slider|similar|accessories|bundle|footer", re.I)):
+    if boton.find_parent(class_=re.compile(r"related|recommend|upsell|cross-sell|carousel|slider|similar|accessories|bundle|footer|usedBuySection|usedAccordionRow|preowned|seminuevo", re.I)):
+        return False
+    if boton.find_parent(id=re.compile(r"usedBuySection|usedAccordionRow|olp_feature_div", re.I)):
         return False
     clases = " ".join(boton.get("class", [])).lower()
     if boton.has_attr("disabled") or "disabled" in clases or "out-of-stock" in clases or boton.get("aria-disabled") == "true":
@@ -579,7 +609,8 @@ def boton_esta_activo(boton):
     palabras_compra = ["comprar", "reservar", "añadir", "cesta", "carrito"]
     palabras_agotado = [
         "agotado", "sin stock", "no disponible", "avísame", "avisarme",
-        "avisadme", "sin existencias", "registrar", "próximamente", "notificar", "reserva agotada"
+        "avisadme", "sin existencias", "registrar", "próximamente", "notificar",
+        "reserva agotada", "segunda mano", "reacondicionado", "seminuevo", "usado"
     ]
     tiene_accion = any(p in texto for p in palabras_compra)
     esta_agotado = any(p in texto for p in palabras_agotado)
@@ -705,16 +736,25 @@ def evaluar_reglas_stock(url, soup):
     # 4. Regla GAME España
     if "game.es" in url:
         panel_compra = soup.find("div", class_=re.compile(r"buy-panel|product-buy", re.I)) or soup
-        boton = panel_compra.find(["a", "button"], class_=re.compile(r"btn-buy|buy-button|cm-btn-buy", re.I))
-        return boton_esta_activo(boton)
+        for boton in panel_compra.find_all(["a", "button"], class_=re.compile(r"btn-buy|buy-button|cm-btn-buy", re.I)):
+            if boton_esta_activo(boton):
+                return True
+        return False
 
-    # 5. Regla Amazon España
+    # 5. Regla Amazon España (ignorando cajas de 2ª mano / Warehouse)
     if "amazon.es" in url:
         caja_compra = soup.find("div", id=re.compile(r"desktop_buybox|buybox", re.I)) or soup
-        boton_cesta = caja_compra.find(["input", "button"], id=re.compile(r"add-to-cart-button|buy-now-button", re.I))
+        botones_cesta = caja_compra.find_all(["input", "button"], id=re.compile(r"add-to-cart-button|buy-now-button", re.I))
+        boton_nuevo_valido = False
+        for b_cesta in botones_cesta:
+            if b_cesta.find_parent(id=re.compile(r"usedBuySection|usedAccordionRow|olp_feature_div", re.I)):
+                continue
+            if not elemento_oculto(b_cesta):
+                boton_nuevo_valido = True
+                break
         bloque_agotado = soup.find("div", id="outOfStock")
         ver_opciones = soup.find(id="buybox-see-all-buying-choices")
-        return bool(boton_cesta and not elemento_oculto(boton_cesta) and not bloque_agotado and not ver_opciones)
+        return bool(boton_nuevo_valido and not bloque_agotado and not ver_opciones)
 
     # 6. Regla Grandes Superficies, Shopify y Tiendas Especializadas
     if any(t in url for t in ["elcorteingles.es", "mediamarkt.es", "pccomponentes.com", "coolmod.com", "carrefour.es", "store.nintendo.com", "caseking.es", "mielectro.es", "hiperocio.com", "baba.es"]):
@@ -800,11 +840,16 @@ def verificar_articulo(producto, es_rescate=False):
         hay_stock = evaluar_reglas_stock(url, soup)
 
         if hay_stock:
-            precio_num, precio_detectado, dentro_de_presupuesto, tope_max = analizar_precio_y_filtro(nombre, soup)
+            precio_num, precio_detectado, dentro_de_presupuesto, precio_min, tope_max = analizar_precio_y_filtro(nombre, soup)
 
-            # BLOQUEO DE SEGURIDAD ABSOLUTA: Si no detecta precio válido o supera el presupuesto, NUNCA avisa a Telegram
+            # BLOQUEO DE SEGURIDAD ABSOLUTA: Si no lee precio, si es inferior al mínimo (2ª mano/golpe) o si supera el máximo (reventa)
             if precio_num is None or not dentro_de_presupuesto:
-                motivo = f"Precio detectado ({precio_detectado}) excede el máx de {int(tope_max)} €" if precio_num is not None else "No se pudo leer un precio válido en web"
+                if precio_num is None:
+                    motivo = "No se pudo leer un precio válido en web"
+                elif precio_num < precio_min:
+                    motivo = f"Precio detectado ({precio_detectado}) inferior al mín de {int(precio_min)} € - posible 2ª mano/reacondicionado"
+                else:
+                    motivo = f"Precio detectado ({precio_detectado}) excede el máx de {int(tope_max)} €"
                 res["linea"] = f"[{nombre}] Stock descartado por seguridad ({motivo})."
                 return res
 
@@ -853,7 +898,7 @@ if MODO_PRUEBA:
     avisar_telegram(
         f"✅ <b>Bot Switch 2 operativo</b>\n\n"
         f"📡 <b>Estado del Proxy:</b> {estado_proxy}\n"
-        f"🛡️ Vigilando {len(PRODUCTOS)} artículos con filtro de precio máximo.",
+        f"🛡️ Vigilando {len(PRODUCTOS)} artículos con filtro de precio mín/máx (solo nuevo).",
         url_compra="https://theshopgamer.com"
     )
 
@@ -942,5 +987,5 @@ if ahora_madrid.hour == 11 and (50 <= ahora_madrid.minute <= 54):
         f"📡 <b>Grandes superficies (Proxy):</b> {proxy_ok}/23 operativas\n"
         f"🔄 <b>Microcortes recuperados al vuelo:</b> {recuperados}\n"
         f"⚡ <b>Tiempo total de barrido:</b> {duracion_seg} segundos\n\n"
-        f"<i>Vigilancia activa con Alarma de Combate (x3 + mensaje fijado) y Filtro de Precio Máximo (600€/150€/50€).</i>"
+        f"<i>Vigilancia activa con Alarma de Combate (x3 + mensaje fijado) y Filtro Nuevo a Estrenar (Consola 515-600€ | Mando 95-150€ | Funda 33-50€).</i>"
     )
