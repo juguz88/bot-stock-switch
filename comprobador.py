@@ -65,11 +65,6 @@ PRODUCTOS = [
         "usar_proxy": False
     },
     {
-        "nombre": "TSG - Mando Zelda 40 Aniversario",
-        "url": "https://theshopgamer.com/es/accesorios-switch-2/21558-nintendo-switch-2-pro-controller-edicion-limitada-the-legend-of-zelda-40-aniversario-para-nintendo-switch-2-version-espanola-0045496322045.html",
-        "usar_proxy": False
-    },
-    {
         "nombre": "XTRALIFE - Nintendo Switch 2 Edición Zelda",
         "url": "https://www.xtralife.com/producto/nintendo-switch-2-edicion-the-legend-of-zelda-40-aniversario-switch-2-edicion-especial/113185",
         "usar_proxy": False
