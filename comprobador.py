@@ -96,7 +96,7 @@ PRODUCTOS = [
     },
     {
         "nombre": "Videodis - Nintendo Switch 2 Edición Zelda",
-        "url": "https://videodis.es/consolas/50622-preventa-consiola-nintendo-switch-2-disponible-el-05062025.html",
+        "url": "https://videodis.es/consolas/50059-preventa-consiola-nintendo-switch-2-disponible-el-05062025.html",
         "usar_proxy": False
     },
     {
