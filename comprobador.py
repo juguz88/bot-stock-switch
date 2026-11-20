@@ -60,11 +60,6 @@ PRODUCTOS = [
         "usar_proxy": False
     },
     {
-        "nombre": "TSG - Mando Zelda 40 Aniversario con Batería Extraíble",
-        "url": "https://theshopgamer.com/es/accesorios-switch-2/21587-nintendo-switch-2-pro-controller-edicion-limitada-the-legend-of-zelda-40-aniversario-btr-bateria-extraible-para-nintendo-switch2-0045496322229.html",
-        "usar_proxy": False
-    },
-    {
         "nombre": "XTRALIFE - Nintendo Switch 2 Edición Zelda",
         "url": "https://www.xtralife.com/producto/nintendo-switch-2-edicion-the-legend-of-zelda-40-aniversario-switch-2-edicion-especial/113185",
         "usar_proxy": False
@@ -75,33 +70,13 @@ PRODUCTOS = [
         "usar_proxy": False
     },
     {
-        "nombre": "XTRALIFE - Mando Zelda 40 Aniversario",
-        "url": "https://www.xtralife.com/producto/nintendo-switch-2-pro-controller-zelda-40-aniversario-switch-2/113184",
-        "usar_proxy": False
-    },
-    {
         "nombre": "IMPACT - Funda Zelda 40 Aniversario",
         "url": "https://impactgame.es/producto/reserva-funda-de-transporte-nintendo-switch-2-zelda-40o-aniversario/",
         "usar_proxy": False
     },
     {
-        "nombre": "IMPACT - Mando Zelda 40 Aniversario",
-        "url": "https://impactgame.es/producto/reserva-mando-pro-nintendo-switch-2-the-legend-of-zelda-40o-aniversario/",
-        "usar_proxy": False
-    },
-    {
-        "nombre": "TodoCon. - Mando Zelda 40 Aniversario",
-        "url": "https://www.todoconsolas.com/accesorios-switch-2/215838-mando_pro_controller_edicion_zelda_40_aniversario_btr_switch_2_280598-045496322229.html",
-        "usar_proxy": False
-    },
-    {
         "nombre": "Videodis - Nintendo Switch 2 Edición Zelda",
         "url": "https://videodis.es/consolas/50059-preventa-consiola-nintendo-switch-2-disponible-el-05062025.html",
-        "usar_proxy": False
-    },
-    {
-        "nombre": "Videodis - Mando Zelda 40 Aniversario",
-        "url": "https://videodis.es/juegos/50076-reserva-funda-y-protector-de-pantalla-edicion-zelda-40th-switch-2-disponible-el-29102026.html",
         "usar_proxy": False
     },
     {
@@ -115,11 +90,6 @@ PRODUCTOS = [
         "usar_proxy": False
     },
     {
-        "nombre": "HíperOcio - Mando Zelda 40 Aniversario",
-        "url": "https://hiperocio.com/products/mando-pro-nintendo-switch-2-zelda-40-aniversario",
-        "usar_proxy": False
-    },
-    {
         "nombre": "Baba - Funda Zelda 40 Aniversario",
         "url": "https://www.baba.es/es/sw2-bolsa-transporte-protector-de-pantalla-zelda-40-aniversario/41903",
         "usar_proxy": False
@@ -129,26 +99,11 @@ PRODUCTOS = [
         "url": "https://www.baba.es/es/sw-consola-nintendo-switch-2-/41902",
         "usar_proxy": False
     },
-    {
-        "nombre": "Baba - Mando Zelda 40 Aniversario (Ficha 1)",
-        "url": "https://www.baba.es/es/sw2-mando-pro-wireless-resident-evil-requiem-edition/42352",
-        "usar_proxy": False
-    },
-    {
-        "nombre": "Baba - Mando Zelda 40 Aniversario (Ficha 2)",
-        "url": "https://www.baba.es/es/sw2-mando-pro-wireless-resident-evil-requiem-edition/41901",
-        "usar_proxy": False
-    },
 
     # --- GRANDES SUPERFICIES (usar_proxy: True -> CON PROXY ESPAÑOL) ---
     {
         "nombre": "Amazon - Nintendo Switch 2 Edición Zelda",
         "url": "https://www.amazon.es/dp/B0F2TN43GH",
-        "usar_proxy": True
-    },
-    {
-        "nombre": "Amazon - Mando Zelda 40 Aniversario",
-        "url": "https://www.amazon.es/dp/B0F2T6WM33",
         "usar_proxy": True
     },
     {
@@ -172,23 +127,8 @@ PRODUCTOS = [
         "usar_proxy": True
     },
     {
-        "nombre": "MediaMarkt - Mando Zelda 40 Aniversario",
-        "url": "https://www.mediamarkt.es/es/product/_mando-nintendo-switch-2-nintendo-pro-edicion-zelda-40-aniversario-para-nintendo-switch-2-bluetooth-vibracion-hd-2-boton-c-para-gamechat-1674233.html",
-        "usar_proxy": True
-    },
-    {
         "nombre": "GAME - Nintendo Switch 2 Edición Zelda",
         "url": "https://www.game.es/nintendo-switch-2-edicion-zelda-40th/267689",
-        "usar_proxy": True
-    },
-    {
-        "nombre": "GAME - Mando Zelda 40 Aniversario",
-        "url": "https://www.game.es/nintendo-switch-2-pro-controller-edicion-zelda-40th/269139",
-        "usar_proxy": True
-    },
-    {
-        "nombre": "GAME - Mando Zelda 40 Aniversario (Day One)",
-        "url": "https://www.game.es/nintendo-switch-2-pro-controller-edicion-zelda-40th-day-one/267690",
         "usar_proxy": True
     },
     {
@@ -199,11 +139,6 @@ PRODUCTOS = [
     {
         "nombre": "PC Comp. - Nintendo Switch 2 Edición Zelda",
         "url": "https://www.pccomponentes.com/nintendo-switch-2-7-9-fullhd-hdr-120hz-256gb-the-legend-of-zelda-40-aniversario-edition",
-        "usar_proxy": True
-    },
-    {
-        "nombre": "PC Comp. - Mando Zelda 40 Aniversario",
-        "url": "https://www.pccomponentes.com/mando-pro-nintendo-switch-2-zelda-40-aniversario-edicion-especial",
         "usar_proxy": True
     },
     {
@@ -227,11 +162,6 @@ PRODUCTOS = [
         "usar_proxy": True
     },
     {
-        "nombre": "Nintendo - Mando Zelda 40 Aniversario",
-        "url": "https://store.nintendo.com/es-es/mando-pro-de-nintendo-switch-2-the-legend-of-zelda-edicin-40-aniversario-soporte-expositor-000000000010019437",
-        "usar_proxy": True
-    },
-    {
         "nombre": "Nintendo - Funda Zelda 40 Aniversario",
         "url": "https://store.nintendo.com/es-es/funda-edicin-40-aniversario-de-the-legend-of-zelda-y-protector-de-pantalla-de-nintendo-switch-2-000000000010019439",
         "usar_proxy": True
@@ -239,11 +169,6 @@ PRODUCTOS = [
     {
         "nombre": "Caseking - Nintendo Switch 2 Edición Zelda",
         "url": "https://www.caseking.es/consola-nintendo-switch-2-the-legend-of-zelda-40th-anniversary-edition/10019448.html",
-        "usar_proxy": True
-    },
-    {
-        "nombre": "Caseking - Mando Zelda 40 Aniversario",
-        "url": "https://www.caseking.es/gamepad-nintendo-switch-2-pro-controller-the-legend-of-zelda-40th-anniversary-edition/10019438.html",
         "usar_proxy": True
     },
     {
@@ -943,7 +868,9 @@ if indices_fallidos:
             except Exception:
                 pass
 
-# 3. Impresión ordenada (1 al 42) y cálculo limpio de telemetría
+# 3. Impresión ordenada y cálculo limpio de telemetría
+total_gratis = sum(1 for p in PRODUCTOS if not p.get("usar_proxy", False))
+total_proxy = sum(1 for p in PRODUCTOS if p.get("usar_proxy", False))
 revisados_ok = sum(1 for r in resultados_finales if r["ok"])
 gratis_ok = sum(1 for r in resultados_finales if r["ok"] and not r["requiere_proxy"])
 proxy_ok = sum(1 for r in resultados_finales if r["ok"] and r["requiere_proxy"])
@@ -959,17 +886,17 @@ duracion_seg = int(time.time() - inicio_barrido)
 print(
     f"\n--- Barrido completado en {duracion_seg}s | "
     f"Verificados: {revisados_ok}/{len(PRODUCTOS)} "
-    f"(Gratis: {gratis_ok}/19 | Proxy: {proxy_ok}/23 | Recuperados: {recuperados}) ---"
+    f"(Gratis: {gratis_ok}/{total_gratis} | Proxy: {proxy_ok}/{total_proxy} | Recuperados: {recuperados}) ---"
 )
 
 # 4. Alerta automática si el proxy de DataImpulse se queda sin megas (407) o cae al 100%
 # Ventana de 0 a 4 min (compatible con relojes de 5 min y 10 min para enviar 1 sola alerta por hora)
-fallo_critico_proxy = errores_407 > 0 or (proxy_ok == 0 and errores_red_proxy >= 15)
+fallo_critico_proxy = errores_407 > 0 or (total_proxy > 0 and proxy_ok == 0 and errores_red_proxy >= max(1, int(total_proxy * 0.7)))
 if fallo_critico_proxy and (0 <= ahora_madrid.minute <= 4):
     avisar_telegram(
         "⚠️ <b>¡ALERTA DE PROXY DATAIMPULSE!</b> ⚠️\n\n"
         "El proxy no responde o <b>se te han agotado los megas del bono</b>.\n"
-        "Las 19 tiendas gratuitas siguen vigiladas, pero las 23 grandes superficies no pueden comprobarse hasta que revises tu saldo en DataImpulse."
+        f"Las {total_gratis} tiendas gratuitas siguen vigiladas, pero las {total_proxy} grandes superficies no pueden comprobarse hasta que revises tu saldo en DataImpulse."
     )
 
 # 5. Informe diario de supervivencia clavado en la pasada de las 11:50 AM (hora de Madrid)
@@ -978,9 +905,9 @@ if ahora_madrid.hour == 11 and (50 <= ahora_madrid.minute <= 54):
     avisar_telegram(
         f"☀️ <b>Parte Diario (11:50): Bot Switch 2 en guardia</b>\n\n"
         f"🛡️ <b>Total tiendas verificadas:</b> {revisados_ok}/{len(PRODUCTOS)}\n"
-        f"🆓 <b>Tiendas sin proxy:</b> {gratis_ok}/19 operativas\n"
-        f"📡 <b>Grandes superficies (Proxy):</b> {proxy_ok}/23 operativas\n"
+        f"🆓 <b>Tiendas sin proxy:</b> {gratis_ok}/{total_gratis} operativas\n"
+        f"📡 <b>Grandes superficies (Proxy):</b> {proxy_ok}/{total_proxy} operativas\n"
         f"🔄 <b>Microcortes recuperados al vuelo:</b> {recuperados}\n"
         f"⚡ <b>Tiempo total de barrido:</b> {duracion_seg} segundos\n\n"
-        f"<i>Vigilancia activa con Alarma de Combate (x3 + mensaje fijado) y Filtro Nuevo a Estrenar (Consola 515-600€ | Mando 95-150€ | Funda 33-50€).</i>"
+        f"<i>Vigilancia activa con Alarma de Combate (x3 + mensaje fijado) y Filtro Nuevo a Estrenar (Consola 515-600€ | Funda 33-50€).</i>"
     )
